@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import requests
 from shapely.geometry import mapping, shape
@@ -508,34 +509,40 @@ def _pct_change(current: float, prior: float) -> float:
     return (float(current) / float(prior) - 1.0) * 100.0
 
 
-def _reliability_label(
+def _reliability_labels(
     mun_df: pd.DataFrame,
-    municipality_code: str,
+    current: pd.DataFrame,
     year: int,
     building_type: str | None,
     *,
     min_transactions: int = 10,
     window_years: int = 4,
-) -> str:
+) -> pd.Series:
+    """Reliability label for every municipality in ``current``, computed in one pass.
+
+    Same rules as the old per-municipality ``_reliability_label``, but the
+    window years are sliced once each (not once per municipality), since
+    ``_year_slice`` re-filters/sorts/dedupes the full multi-year frame.
+    """
     if year < _PRE_2020_YEAR:
-        return "unknown"
-    slice_now = _year_slice(mun_df, year, building_type)
-    row = slice_now.loc[slice_now["municipality_code"] == municipality_code]
-    if row.empty or pd.isna(row.iloc[0]["price_per_sqm"]):
-        return "none"
+        return pd.Series("unknown", index=current.index, dtype=object)
 
-    total = 0
+    codes = current["municipality_code"]
+    totals = pd.Series(0.0, index=codes.to_numpy())
     for offset in range(window_years):
-        y = year - offset
-        chunk = _year_slice(mun_df, y, building_type)
-        match = chunk.loc[chunk["municipality_code"] == municipality_code]
-        if match.empty:
+        chunk = _year_slice(mun_df, year - offset, building_type)
+        if chunk.empty:
             continue
-        tx = match.iloc[0]["transactions"]
-        if pd.notna(tx):
-            total += int(tx)
+        tx = chunk.set_index("municipality_code")["transactions"].astype(float)
+        totals = totals.add(tx.reindex(totals.index).fillna(0.0), fill_value=0.0)
 
-    return "ok" if total >= min_transactions else "low"
+    row_totals = totals.reindex(codes.to_numpy()).to_numpy()
+    labels = np.where(
+        current["price_per_sqm"].isna().to_numpy(),
+        "none",
+        np.where(row_totals >= min_transactions, "ok", "low"),
+    )
+    return pd.Series(labels, index=current.index, dtype=object)
 
 
 def municipality_metrics(
@@ -568,8 +575,17 @@ def municipality_metrics(
         "price_per_sqm"
     ]
 
+    reliability = _reliability_labels(
+        mun_df,
+        current,
+        year,
+        building_type,
+        min_transactions=min_transactions,
+        window_years=window_years,
+    )
+
     rows: list[dict[str, Any]] = []
-    for _, row in current.iterrows():
+    for idx, row in current.iterrows():
         code = row["municipality_code"]
         price = float(row["price_per_sqm"])
         rows.append(
@@ -580,14 +596,7 @@ def municipality_metrics(
                 "pct_change_1y": _pct_change(price, prior_1y.get(code, float("nan"))),
                 "pct_change_5y": _pct_change(price, prior_5y.get(code, float("nan"))),
                 "transactions": row["transactions"],
-                "reliability": _reliability_label(
-                    mun_df,
-                    code,
-                    year,
-                    building_type,
-                    min_transactions=min_transactions,
-                    window_years=window_years,
-                ),
+                "reliability": reliability.loc[idx],
             }
         )
 
