@@ -18,6 +18,7 @@ from housing_analyzer.map import (
     METRIC_CHANGE_1Y_REAL,
     METRIC_CHANGE_5Y,
     METRIC_CHANGE_5Y_REAL,
+    METRIC_FITS_BUDGET,
     METRIC_PRICE,
     METRIC_PRICE_TO_INCOME,
     METRIC_SALES,
@@ -35,11 +36,14 @@ from housing_analyzer.map import (
     metric_color_range,
     metric_is_missing,
     postal_code_from_selection,
+    prepare_budget_fit_dataframe,
     prepare_map_dataframe,
     search_area_matches,
     trailing_sales_by_area,
     trailing_sales_sum,
 )
+
+from tests.conftest import assert_finland_map_layout
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
@@ -299,6 +303,7 @@ def test_choropleth_layout_leaves_room_for_toolbar_and_colorbar(
         cpi_df=cpi_df,
     )
     fig = build_choropleth_figure(frame, sample_boundaries, METRIC_PRICE)
+    assert_finland_map_layout(fig)
     assert fig.layout.margin.t >= 30
     assert fig.layout.margin.t >= MAP_TOP_MARGIN
     value_traces = _value_layer_traces(fig)
@@ -545,3 +550,31 @@ def test_hover_notes_cpi_not_final_for_incomplete_quarter(
     assert bool(row["missing"])
     assert NO_CPI_HOVER in row["hover"]
     assert NO_DATA_HOVER not in row["hover"]
+
+
+def test_choropleth_empty_figure_centres_on_finland(sample_boundaries):
+    fig = build_choropleth_figure(
+        pd.DataFrame(), sample_boundaries, METRIC_PRICE
+    )
+    assert_finland_map_layout(fig)
+
+
+def test_budget_fit_choropleth_centres_on_finland(
+    sample_prices_frame, sample_boundaries, cpi_df
+):
+    frame = prepare_budget_fit_dataframe(
+        sample_prices_frame,
+        sample_boundaries,
+        "2024Q4",
+        "1",
+        50.0,
+        300_000.0,
+        cpi_df=cpi_df,
+    )
+    fig = build_choropleth_figure(frame, sample_boundaries, METRIC_FITS_BUDGET)
+    assert_finland_map_layout(fig)
+
+    empty = build_choropleth_figure(
+        pd.DataFrame(), sample_boundaries, METRIC_FITS_BUDGET
+    )
+    assert_finland_map_layout(empty)

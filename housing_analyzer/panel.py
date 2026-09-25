@@ -19,9 +19,12 @@ from housing_analyzer.analysis.metrics import (
 from housing_analyzer.data.cpi import cpi_by_quarter, load_cpi
 from housing_analyzer.map import (
     BUILDING_TYPE_CHOICES,
+    latest_quarter_with_data,
     resolve_building_type_label,
     trailing_sales_sum,
 )
+
+DEFAULT_SELECTED_POSTAL_CODE = "00100"
 
 MUNICIPALITY_CODE_PROPERTY = "kunta"
 NATIONAL_GROUP = "__national__"
@@ -518,6 +521,26 @@ def trailing_sales_count(
 ) -> float:
     code = None if building_type_code in (None, "all") else building_type_code
     return trailing_sales_sum(prices_df, postal_code, quarter, code)
+
+
+def default_selected_postal_code(prices_df: pd.DataFrame) -> str | None:
+    """Postal code to select on first load: 00100 when present, else busiest in latest quarter."""
+    if prices_df.empty:
+        return None
+    codes = prices_df["postal_code"].astype(str).str.zfill(5)
+    if codes.eq(DEFAULT_SELECTED_POSTAL_CODE).any():
+        return DEFAULT_SELECTED_POSTAL_CODE
+    quarter = latest_quarter_with_data(prices_df)
+    if quarter is None:
+        return None
+    quarter_rows = prices_df.loc[prices_df["quarter"] == quarter]
+    if quarter_rows.empty:
+        return None
+    q_codes = quarter_rows["postal_code"].astype(str).str.zfill(5)
+    totals = quarter_rows.groupby(q_codes)["transactions"].sum(min_count=1)
+    if totals.empty or totals.isna().all():
+        return None
+    return str(totals.idxmax())
 
 
 def reliability_explanation(

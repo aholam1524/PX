@@ -13,6 +13,7 @@ from housing_analyzer.data.prices import parse_json_stat2
 from housing_analyzer.panel import (
     area_detail_export_frame,
     build_trend_chart_data,
+    default_selected_postal_code,
     flag_unusual_quarter_changes,
     format_area_header,
     index_series_to_100,
@@ -34,6 +35,28 @@ def sample_prices_frame() -> pd.DataFrame:
 def sample_boundaries() -> dict:
     with (FIXTURES / "boundaries_sample.geojson").open(encoding="utf-8") as handle:
         return json.load(handle)
+
+
+def test_default_selected_postal_code_prefers_00100(sample_prices_frame):
+    assert default_selected_postal_code(sample_prices_frame) == "00100"
+
+
+def test_default_selected_postal_code_empty_table():
+    assert default_selected_postal_code(pd.DataFrame()) is None
+
+
+def test_default_selected_postal_code_falls_back_to_busiest_quarter():
+    df = pd.DataFrame(
+        {
+            "postal_code": ["00200", "00200", "00300"],
+            "quarter": ["2024Q4", "2024Q4", "2024Q4"],
+            "price_per_sqm": [1000.0, 1000.0, 2000.0],
+            "transactions": [50, 50, 5],
+            "building_type": ["1"] * 3,
+            "area_name": ["A", "A", "B"],
+        }
+    )
+    assert default_selected_postal_code(df) == "00200"
 
 
 def test_format_area_header_normal():
