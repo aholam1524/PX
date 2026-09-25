@@ -46,15 +46,33 @@ from housing_analyzer.affordability import (
     total_interest,
     typical_dwelling_price,
 )
+from housing_analyzer.hybrid_map import (
+    building_type_mapping_caption,
+    build_hybrid_choropleth_figure,
+    classify_hybrid_postal_coverage,
+    hybrid_coverage_counts,
+    hybrid_metric_color_range,
+    hybrid_metric_supported,
+    hybrid_unsupported_reason,
+    map_selection_from_event_or_postal,
+    municipality_files_available,
+    municipality_map_card_data,
+    prepare_municipality_map_dataframe,
+    postal_to_municipality_codes,
+)
+from housing_analyzer.data.municipalities import load_municipality_boundaries, load_municipality_prices
 from housing_analyzer.map import (
     BUDGET_FIT_LABELS,
     BUILDING_TYPE_CHOICES,
     METRIC_CHOICES,
+    METRIC_CHANGE_1Y,
+    METRIC_CHANGE_5Y,
     METRIC_FITS_BUDGET,
     METRIC_PRICE,
     build_choropleth_figure,
     count_areas_with_published_price,
     default_map_quarter,
+    format_metric_value,
     list_quarters,
     metric_color_range,
     postal_code_from_selection,
@@ -116,6 +134,16 @@ def _load_housing_data() -> tuple:
     demographics = load_demographics()
     manifest = load_manifest()
     return prices, boundaries, cpi, demographics, manifest
+
+
+@st.cache_data(show_spinner=False)
+def _load_municipality_data() -> tuple[pd.DataFrame | None, dict | None]:
+    if not municipality_files_available():
+        return None, None
+    try:
+        return load_municipality_prices(), load_municipality_boundaries()
+    except Exception:  # noqa: BLE001 — fall back to postal-only map
+        return None, None
 
 
 @st.cache_data(show_spinner=False)
@@ -531,6 +559,59 @@ def _render_compare_tab(
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 
+def _render_municipality_panel(
+    mun_prices: pd.DataFrame,
+    postal_code: str,
+    boundaries: dict,
+    quarter: str,
+    building_type_code: str | None,
+) -> None:
+    code = str(postal_code).zfill(5)
+    muni_code = postal_to_municipality_codes(boundaries).get(code)
+    if muni_code is None:
+        st.warning("This area has no municipality code on the boundary data.")
+        return
+    card = municipality_map_card_data(
+        mun_prices, muni_code, quarter, building_type_code
+    )
+    if card is None:
+        st.warning("No municipality figures for this selection.")
+        return
+
+    st.subheader("Municipality figure")
+    st.markdown(f"**{card.municipality_name}** ({card.municipality_code})")
+    st.caption(
+        f"Annual figures for **{card.year}** (Statistics Finland municipality table). "
+        "You clicked a postal-code area without its own published price; "
+        "the map colour comes from the municipality average."
+    )
+
+    c1, c2 = st.columns(2)
+    c1.metric(
+        "Price per m² (EUR)",
+        format_metric_value(card.price_per_sqm, METRIC_PRICE)
+        if card.price_per_sqm is not None
+        else "No data",
+    )
+    c2.metric(
+        "1-year change",
+        format_metric_value(card.pct_change_1y, METRIC_CHANGE_1Y)
+        if card.pct_change_1y is not None
+        else "—",
+    )
+    c3, c4 = st.columns(2)
+    c3.metric(
+        "5-year change",
+        format_metric_value(card.pct_change_5y, METRIC_CHANGE_5Y)
+        if card.pct_change_5y is not None
+        else "—",
+    )
+    sales_text = "—"
+    if card.transactions is not None:
+        sales_text = str(card.transactions)
+    c4.metric(f"Sales ({card.year})", sales_text)
+
+
 def _render_detail_panel(
     prices: pd.DataFrame,
     boundaries: dict,
@@ -697,6 +778,7 @@ def _render_detail_panel(
 try:
     with st.spinner("Loading housing prices and map boundaries…"):
         prices, boundaries, cpi, demographics, manifest = _load_housing_data()
+        mun_prices, mun_boundaries = _load_municipality_data()
 except Exception as exc:  # noqa: BLE001 — show reason in UI
     st.error(_friendly_load_error(exc))
     st.stop()
@@ -736,6 +818,16 @@ with st.sidebar:
         value=False,
         help="When off, the colour scale uses the 2nd–98th percentile so outliers do not wash out the map.",
     )
+    municipality_data_ready = mun_prices is not None and mun_boundaries is not None
+    fill_gaps_with_municipality = st.checkbox(
+        "Fill gaps with municipality values",
+        value=True,
+        disabled=not municipality_data_ready,
+        help=(
+            "Colour postal-code areas without their own price using yearly municipality "
+            "averages underneath."
+        ),
+    )
     afford_inputs = _affordability_sidebar_inputs()
 
 boundary_edition = None
@@ -764,16 +856,61 @@ with map_tab:
         afford_inputs["size_sqm"],
         max_affordable_price,
     )
+    hybrid_active = (
+        fill_gaps_with_municipality
+        and municipality_data_ready
+        and hybrid_metric_supported(metric)
+    )
+    mun_map_df = pd.DataFrame()
+    municipality_year: int | None = None
+    if hybrid_active and mun_prices is not None:
+        mun_map_df, municipality_year = prepare_municipality_map_dataframe(
+            mun_prices,
+            cpi,
+            quarter,
+            building_type_code,
+            metric,
+            size_sqm=afford_inputs["size_sqm"],
+            max_affordable_price=max_affordable_price,
+        )
+        if mun_map_df.empty:
+            hybrid_active = False
+        else:
+            p2m = postal_to_municipality_codes(boundaries)
+            map_df = classify_hybrid_postal_coverage(
+                map_df, metric, p2m, mun_map_df
+            )
+
     color_range = None
     if metric != METRIC_FITS_BUDGET and not map_df.empty:
-        color_range = metric_color_range(
-            map_df.loc[~map_df["missing"], metric],
+        if hybrid_active and not mun_map_df.empty:
+            color_range = hybrid_metric_color_range(
+                map_df,
+                mun_map_df,
+                metric,
+                use_full_range=use_full_color_range,
+            )
+        else:
+            color_range = metric_color_range(
+                map_df.loc[~map_df["missing"], metric],
+                metric,
+                use_full_range=use_full_color_range,
+            )
+
+    if hybrid_active and mun_boundaries is not None:
+        fig = build_hybrid_choropleth_figure(
+            map_df,
+            mun_map_df,
+            boundaries,
+            mun_boundaries,
             metric,
-            use_full_range=use_full_color_range,
+            color_range=color_range,
+            fill_gaps=True,
         )
-    fig = build_choropleth_figure(
-        map_df, boundaries, metric, color_range=color_range
-    )
+    else:
+        fig = build_choropleth_figure(
+            map_df, boundaries, metric, color_range=color_range
+        )
 
     if boundary_edition:
         st.caption(f"Map boundaries: {boundary_edition} (Statistics Finland).")
@@ -796,13 +933,35 @@ with map_tab:
                 "- **Coloured areas** show the selected metric for the chosen quarter and building type.\n"
                 "- **Grey areas** have no published price for that selection "
                 f"({METRIC_PRICE.replace('_', ' ')} missing or suppressed); they are never shown as zero.\n"
-                "- **Lighter fill** and the hover note *Based on few sales* mark **low reliability** "
+                "- With **Fill gaps with municipality values** on, a **lighter municipality fill** "
+                "shows yearly averages where postal-code prices are missing; postal detail stays on top.\n"
+                "- **Lighter borders** and the hover note *Based on few sales* mark **low reliability** "
                 "(fewer than ten sales in the last four quarters).\n"
                 "- Hover a region for postal code, area name, metric value, sales, and reliability."
             )
 
+    if not municipality_data_ready:
+        st.caption(
+            "Municipality fallback data is not in this checkout, so the map uses postal-code "
+            "prices only (same as before)."
+        )
+    elif hybrid_active and municipality_year is not None:
+        st.caption(
+            f"Municipality values are annual figures for {municipality_year}; "
+            f"postal-code values are for {quarter}."
+        )
+        bt_caption = building_type_mapping_caption(building_type_code)
+        if bt_caption:
+            st.caption(bt_caption)
+    elif not hybrid_metric_supported(metric):
+        reason = hybrid_unsupported_reason(metric)
+        if reason:
+            st.caption(reason)
+
     if "selected_postal_code" not in st.session_state:
         st.session_state.selected_postal_code = None
+    if "selected_map_level" not in st.session_state:
+        st.session_state.selected_map_level = "postal"
 
     map_col, detail_col = st.columns([5, 4])
 
@@ -820,13 +979,21 @@ with map_tab:
         )
 
         if not map_df.empty:
-            areas_with_metric = int((~map_df["missing"]).sum())
-            total_areas = len(map_df)
-            st.caption(
-                f"{areas_with_metric} of {total_areas} areas have a published price for this "
-                "selection. Statistics Finland publishes prices only for areas with enough "
-                "sales; the rest are shown in grey and are never treated as zero."
-            )
+            if hybrid_active and "coverage" in map_df.columns:
+                counts = hybrid_coverage_counts(map_df)
+                st.caption(
+                    f"{counts.own_postal:,} postal-code areas have their own price; "
+                    f"{counts.municipality_coloured:,} more are coloured from municipality "
+                    f"averages; {counts.no_data:,} have no data."
+                )
+            else:
+                areas_with_metric = int((~map_df["missing"]).sum())
+                total_areas = len(map_df)
+                st.caption(
+                    f"{areas_with_metric} of {total_areas} areas have a published price for this "
+                    "selection. Statistics Finland publishes prices only for areas with enough "
+                    "sales; the rest are shown in grey and are never treated as zero."
+                )
             if metric != METRIC_FITS_BUDGET and not use_full_color_range:
                 st.caption(
                     "Colour scale covers the 2nd to 98th percentile; more extreme areas "
@@ -847,7 +1014,9 @@ with map_tab:
                     f"price (typically about {typical_rounded})."
                 )
 
-        clicked_code = postal_code_from_selection(selection)
+        map_pick = map_selection_from_event_or_postal(selection)
+        clicked_code = map_pick.postal_code if map_pick else None
+        clicked_level = map_pick.level if map_pick else "postal"
 
         search_hits = search_area_matches(map_df, search_query)
         if search_hits:
@@ -858,23 +1027,38 @@ with map_tab:
             )
             if st.button("Show selected area"):
                 st.session_state.selected_postal_code = picked
+                st.session_state.selected_map_level = "postal"
         elif search_query.strip():
             st.caption("No areas match your search.")
 
         if clicked_code:
             st.session_state.selected_postal_code = clicked_code
+            st.session_state.selected_map_level = clicked_level
 
     with detail_col:
         selected = st.session_state.selected_postal_code
         if selected:
-            _render_detail_panel(
-                prices,
-                boundaries,
-                cpi,
-                selected,
-                quarter,
-                building_type_code,
-            )
+            if (
+                st.session_state.get("selected_map_level") == "municipality"
+                and hybrid_active
+                and mun_prices is not None
+            ):
+                _render_municipality_panel(
+                    mun_prices,
+                    selected,
+                    boundaries,
+                    quarter,
+                    building_type_code,
+                )
+            else:
+                _render_detail_panel(
+                    prices,
+                    boundaries,
+                    cpi,
+                    selected,
+                    quarter,
+                    building_type_code,
+                )
         else:
             st.info(
                 "Click a map area or search and choose **Show selected area** to open the detail panel."
