@@ -12,6 +12,7 @@ import pytest
 from housing_analyzer.data.municipalities import parse_municipality_json_stat2
 from housing_analyzer.data.prices import parse_json_stat2
 from housing_analyzer.hybrid_map import (
+    GREY_TRACE_NAME,
     MUNICIPALITY_TRACE_NAME,
     POSTAL_FALLBACK_TRACE_NAME,
     POSTAL_TRACE_NAME,
@@ -28,7 +29,14 @@ from housing_analyzer.hybrid_map import (
     prepare_municipality_map_dataframe,
     postal_to_municipality_codes,
 )
-from housing_analyzer.map import METRIC_CHANGE_1Y, METRIC_PRICE, prepare_map_dataframe
+from housing_analyzer.map import (
+    BUDGET_FIT_LABELS,
+    METRIC_CHANGE_1Y,
+    METRIC_FITS_BUDGET,
+    METRIC_PRICE,
+    prepare_budget_fit_dataframe,
+    prepare_map_dataframe,
+)
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
@@ -226,3 +234,54 @@ def test_map_selection_from_event_reads_level():
     event = _Event({"points": [{"customdata": ["01200", "Vantaa", "municipality"]}]})
     picked = map_selection_from_event(event)
     assert picked == MapSelection(postal_code="01200", level="municipality")
+
+
+def test_hybrid_budget_figure_layers_municipality_and_postal(
+    sample_prices_frame,
+    sample_boundaries,
+    sample_municipality_prices,
+    sample_municipality_boundaries,
+    cpi_df,
+):
+    size_sqm = 50.0
+    max_affordable = 300_000.0
+    postal = prepare_budget_fit_dataframe(
+        sample_prices_frame,
+        sample_boundaries,
+        "2024Q4",
+        "1",
+        size_sqm,
+        max_affordable,
+        cpi_df=cpi_df,
+    )
+    mun_df, _year = prepare_municipality_map_dataframe(
+        sample_municipality_prices,
+        cpi_df,
+        "2024Q4",
+        "1",
+        METRIC_FITS_BUDGET,
+        size_sqm=size_sqm,
+        max_affordable_price=max_affordable,
+    )
+    fig = build_hybrid_choropleth_figure(
+        postal,
+        mun_df,
+        sample_boundaries,
+        sample_municipality_boundaries,
+        METRIC_FITS_BUDGET,
+    )
+    trace_names = [t.name for t in fig.data]
+
+    # 00100 has its own price, so a postal-level budget-fit trace is drawn.
+    assert any(name in trace_names for name in BUDGET_FIT_LABELS.values())
+    # 01200 has no postal price but its municipality (Vantaa) does, so the
+    # transparent postal-fallback overlay sits on top of the municipality fill.
+    assert POSTAL_FALLBACK_TRACE_NAME in trace_names
+    assert any(
+        name == f"{label} (municipality)" for name in trace_names for label in BUDGET_FIT_LABELS.values()
+    )
+    # 99999 has no municipality mapping at all, so it falls through to "no data".
+    assert GREY_TRACE_NAME in trace_names
+
+    fallback_trace = next(t for t in fig.data if t.name == POSTAL_FALLBACK_TRACE_NAME)
+    assert "01200" in list(fallback_trace.locations)
