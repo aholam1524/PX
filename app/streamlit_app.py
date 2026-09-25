@@ -6,7 +6,7 @@ import pandas as pd
 import streamlit as st
 
 from housing_analyzer.analysis.metrics import summarize_area
-from housing_analyzer.data import load_boundaries, load_manifest, load_prices
+from housing_analyzer.data import load_boundaries, load_cpi, load_manifest, load_prices
 from housing_analyzer.data.paths import use_fixtures
 from housing_analyzer.data.snapshot import snapshot_is_complete
 from housing_analyzer.map import (
@@ -64,22 +64,33 @@ if not use_fixtures() and not snapshot_is_complete():
 def _load_housing_data() -> tuple:
     prices = load_prices()
     boundaries = load_boundaries()
+    cpi = load_cpi()
     manifest = load_manifest()
-    return prices, boundaries, manifest
+    return prices, boundaries, cpi, manifest
 
 
 @st.cache_data(show_spinner=False)
-def _cached_map_frame(_prices, _boundaries, quarter, building_type_code, metric):
+def _cached_map_frame(_prices, _boundaries, _cpi, quarter, building_type_code, metric):
     """Map table for one selection. The large inputs are not hashed (leading underscore);
     the selection values are the cache key, so clicking the map does not recompute it."""
-    return prepare_map_dataframe(_prices, _boundaries, quarter, building_type_code, metric)
+    return prepare_map_dataframe(
+        _prices, _boundaries, quarter, building_type_code, metric, cpi_df=_cpi
+    )
 
 
 @st.cache_data(show_spinner=False)
-def _cached_trend_chart_data(_prices, _boundaries, postal_code, building_type, index_to_100):
+def _cached_trend_chart_data(
+    _prices, _boundaries, _cpi, postal_code, building_type, index_to_100, use_real
+):
     """Trend chart series for one area/building-type/index selection (see _cached_map_frame)."""
     return build_trend_chart_data(
-        _prices, _boundaries, postal_code, building_type, index_to_100=index_to_100
+        _prices,
+        _boundaries,
+        postal_code,
+        building_type,
+        index_to_100=index_to_100,
+        use_real=use_real,
+        cpi_df=_cpi,
     )
 
 
@@ -109,6 +120,7 @@ def _format_building_type_display(
 def _render_detail_panel(
     prices: pd.DataFrame,
     boundaries: dict,
+    cpi: pd.DataFrame,
     postal_code: str,
     quarter: str,
     map_building_type_code: str | None,
@@ -130,6 +142,13 @@ def _render_detail_panel(
         key=f"panel_bt_{code}",
     )
     panel_bt_label = resolve_panel_building_type(prices, panel_bt_code)
+    price_mode = st.radio(
+        "Trend chart prices",
+        options=("nominal", "real"),
+        format_func=lambda v: "Nominal" if v == "nominal" else "Real (inflation-adjusted)",
+        horizontal=True,
+        key=f"panel_price_mode_{code}",
+    )
     index_mode = st.checkbox("Index to 100 at the start", key=f"panel_index_{code}")
 
     summary = summarize_area(prices, code, quarter, building_type=panel_bt_label)
@@ -183,12 +202,20 @@ def _render_detail_panel(
     trend_data = _cached_trend_chart_data(
         prices,
         boundaries,
+        cpi,
         code,
         panel_bt_label,
         index_mode,
+        price_mode == "real",
     )
     trend_fig = build_trend_figure(trend_data, area_label=f"{code} {area_name}".strip())
     st.plotly_chart(trend_fig, use_container_width=True, key=f"trend_{code}")
+    if price_mode == "real":
+        st.caption(
+            "Real prices remove general inflation using Statistics Finland's consumer "
+            "price index, so the trend shows purchasing-power change rather than "
+            "nominal euro amounts."
+        )
 
     if not trend_data.municipality_available:
         st.caption(
@@ -232,7 +259,7 @@ def _render_detail_panel(
 
 try:
     with st.spinner("Loading housing prices and map boundaries…"):
-        prices, boundaries, manifest = _load_housing_data()
+        prices, boundaries, cpi, manifest = _load_housing_data()
 except Exception as exc:  # noqa: BLE001 — show reason in UI
     st.error(_friendly_load_error(exc))
     st.stop()
@@ -269,7 +296,7 @@ if manifest:
     if isinstance(boundaries_meta, dict):
         boundary_edition = boundaries_meta.get("boundary_edition")
 
-map_df = _cached_map_frame(prices, boundaries, quarter, building_type_code, metric)
+map_df = _cached_map_frame(prices, boundaries, cpi, quarter, building_type_code, metric)
 fig = build_choropleth_figure(map_df, boundaries, metric)
 
 if boundary_edition:
@@ -326,6 +353,7 @@ with detail_col:
         _render_detail_panel(
             prices,
             boundaries,
+            cpi,
             selected,
             quarter,
             building_type_code,

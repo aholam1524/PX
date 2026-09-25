@@ -4,7 +4,7 @@ App repo. The agent factory lives in [aholam1524/ASD](https://github.com/aholam1
 
 ## Housing price analyzer
 
-Interactive map and analysis for **Finnish housing prices** by postal-code area. The Streamlit app shows a **MapLibre choropleth** of postal-code boundaries coloured by your chosen metric (price per square metre, 1- or 5-year change, or sales in the last four quarters). Use the sidebar to pick quarter and building type; hover for details, click or search to select an area. The **area detail panel** (beside the map) shows key figures, rank and reliability, a quarterly **trend chart** with municipality and national comparison lines (gaps where data is missing), sales volume from 2020, flagged unusual quarter-on-quarter moves, and a CSV download. Grey areas have no published price; lighter borders and hover notes mark low-reliability estimates.
+Interactive map and analysis for **Finnish housing prices** by postal-code area. The Streamlit app shows a **MapLibre choropleth** of postal-code boundaries coloured by your chosen metric (price per square metre, nominal or inflation-adjusted 1- or 5-year change, or sales in the last four quarters). Use the sidebar to pick quarter and building type; hover for details, click or search to select an area. The **area detail panel** (beside the map) shows key figures, rank and reliability, a quarterly **trend chart** with municipality and national comparison lines (gaps where data is missing), sales volume from 2020, flagged unusual quarter-on-quarter moves, and a CSV download. Grey areas have no published price; lighter borders and hover notes mark low-reliability estimates.
 
 **Run locally** (Python 3.12):
 
@@ -43,7 +43,9 @@ Quarterly housing-company prices and transaction counts by postal-code area come
 
 Postal-code area boundaries for the map come from Statistics Finland’s WFS service [`geo.stat.fi/geoserver/postialue/wfs`](https://geo.stat.fi/geoserver/postialue/wfs) (feature type `postialue:pno_2022`, matching the 2022-01-01 postal-code list used in the price table). The loader lives in `housing_analyzer/data/boundaries.py` (`load_boundaries()` / `join_prices_to_areas()`).
 
-Parsed downloads are cached under `data/raw/` (git-ignored). The app prefers a committed snapshot under `data/snapshot/` (`prices.csv.gz`, `boundaries.geojson.gz`, `manifest.json`) so cold starts do not hit the live APIs.
+Parsed downloads are cached under `data/raw/` (git-ignored). The app prefers a committed snapshot under `data/snapshot/` (`prices.csv.gz`, `boundaries.geojson.gz`, `cpi.csv.gz`, `manifest.json`) so cold starts do not hit the live APIs.
+
+**Real (inflation-adjusted) prices** express nominal euro per square metre in the purchasing power of a chosen CPI quarter (by default the latest complete quarter), using Statistics Finland’s overall consumer price index. Source: [Consumer Price Indices, overall index, monthly (`11xs`)](https://pxdata.stat.fi/PxWeb/api/v1/en/StatFin/khi/11xs.px), series `ip_0_2015` (2015=100).
 
 ### Refreshing the data
 
@@ -55,7 +57,7 @@ Quarterly is enough for housing statistics; you only need a refresh when Statist
 
 Pure helpers in `housing_analyzer/analysis/` turn the tidy price table into map and panel metrics. They never call the network and never modify the input DataFrame.
 
-- **Percentage change** (`pct_change`): For each postal-code area and building type, compares the price in a quarter to the price **four calendar quarters earlier** (one year when `quarters=4`, five years when `quarters=20`). If either price is missing, the change is missing—not zero.
+- **Percentage change** (`pct_change`, `real_pct_change`): For each postal-code area and building type, compares the price in a quarter to the price **four calendar quarters earlier** (one year when `quarters=4`, five years when `quarters=20`). Real changes use `real_price_per_sqm` from `to_real()` and the quarterly CPI (`cpi_by_quarter`). If either price is missing, the change is missing—not zero.
 - **Reliability** (`reliability`): Labels each row using transaction counts in a trailing window (default: sum of the last four quarters). `"ok"` means enough transactions for a stable average; `"low"` means fewer; `"none"` means the price itself is missing; `"unknown"` applies to quarters before 2020, when public transaction counts are not available.
 - **Rank and percentile** (`rank_percentile`): For one quarter, ranks areas by price (1 = most expensive). Areas without a price are not ranked. Tied prices share the same rank. When no single building type is chosen, the area price is a **transaction-weighted** average across types that have transaction counts; if none do, a simple mean of available prices is used—the result includes which method was applied.
 - **Regional average** (`regional_average`): For a caller-supplied mapping from postal codes to groups (for example municipalities), computes a group average for one quarter. Uses transaction-weighted averaging across areas when weights exist; otherwise falls back to a simple mean, and records which method was used.
