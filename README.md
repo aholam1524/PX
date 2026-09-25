@@ -4,7 +4,7 @@ App repo. The agent factory lives in [aholam1524/ASD](https://github.com/aholam1
 
 ## Housing price analyzer
 
-Interactive map and analysis for **Finnish housing prices** by postal-code area: map colouring by price metrics, plus trends, comparison, ranking, and affordability for a selected area (features arrive in later tickets).
+Interactive map and analysis for **Finnish housing prices** by postal-code area. The Streamlit app shows a **MapLibre choropleth** of postal-code boundaries coloured by your chosen metric (price per square metre, 1- or 5-year change, or sales in the last four quarters). Use the sidebar to pick quarter and building type; hover for details, click or search to select an area and see a short summary card. Grey areas have no published price; lighter borders and hover notes mark low-reliability estimates.
 
 **Run locally** (Python 3.12):
 
@@ -13,9 +13,15 @@ pip install -r requirements.txt
 streamlit run app/streamlit_app.py
 ```
 
-- **`housing_analyzer/`** — data and analysis code
+**Run without network or snapshot** (small fixture data under `tests/fixtures/`):
+
+```bash
+HOUSING_USE_FIXTURES=1 streamlit run app/streamlit_app.py
+```
+
+- **`housing_analyzer/`** — data, analysis, and map figure helpers (`housing_analyzer/map.py`)
 - **`app/streamlit_app.py`** — Streamlit UI
-- **`tests/`** — pytest (fixtures under `tests/fixtures/` when added)
+- **`tests/`** — pytest; fixtures under `tests/fixtures/` for offline runs
 
 ### Data
 
@@ -40,6 +46,7 @@ Pure helpers in `housing_analyzer/analysis/` turn the tidy price table into map 
 - **Rank and percentile** (`rank_percentile`): For one quarter, ranks areas by price (1 = most expensive). Areas without a price are not ranked. Tied prices share the same rank. When no single building type is chosen, the area price is a **transaction-weighted** average across types that have transaction counts; if none do, a simple mean of available prices is used—the result includes which method was applied.
 - **Regional average** (`regional_average`): For a caller-supplied mapping from postal codes to groups (for example municipalities), computes a group average for one quarter. Uses transaction-weighted averaging across areas when weights exist; otherwise falls back to a simple mean, and records which method was used.
 - **Area summary** (`summarize_area`): One dict with price, one- and five-year changes, reliability, rank, and percentile for a selected area and quarter.
+- **All areas at once** (`summarize_areas`, `area_prices_at`, `reliability_at`): The same numbers for every postal-code area in one pass over the data. The map uses these instead of calling `summarize_area` per area, so drawing the map does not slow down as the number of areas grows. A test checks that both give identical results.
 
 Nothing in this repository is investment advice.
 

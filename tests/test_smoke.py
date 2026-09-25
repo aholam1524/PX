@@ -24,10 +24,12 @@ def test_price_per_sqm_non_positive_area():
         price_per_sqm(100_000, -10)
 
 
-def test_streamlit_app_runs_without_exception():
+def test_streamlit_app_runs_without_exception(monkeypatch):
     apptest_mod = importlib.util.find_spec("streamlit.testing.v1")
     if apptest_mod is None:
         pytest.skip("streamlit.testing.v1.AppTest not available in this Streamlit version")
+
+    monkeypatch.setenv("HOUSING_USE_FIXTURES", "1")
 
     from streamlit.testing.v1 import AppTest
 
