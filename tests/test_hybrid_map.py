@@ -31,6 +31,7 @@ from housing_analyzer.hybrid_map import (
 )
 from housing_analyzer.map import (
     BUDGET_FIT_LABELS,
+    MAP_TOP_MARGIN,
     METRIC_CHANGE_1Y,
     METRIC_FITS_BUDGET,
     METRIC_PRICE,
@@ -285,3 +286,74 @@ def test_hybrid_budget_figure_layers_municipality_and_postal(
 
     fallback_trace = next(t for t in fig.data if t.name == POSTAL_FALLBACK_TRACE_NAME)
     assert "01200" in list(fallback_trace.locations)
+
+
+def test_hybrid_value_figure_leaves_room_for_toolbar(
+    sample_prices_frame,
+    sample_boundaries,
+    sample_municipality_prices,
+    sample_municipality_boundaries,
+    cpi_df,
+):
+    postal = prepare_map_dataframe(
+        sample_prices_frame,
+        sample_boundaries,
+        "2024Q4",
+        "1",
+        METRIC_PRICE,
+        cpi_df=cpi_df,
+    )
+    mun_df, _ = prepare_municipality_map_dataframe(
+        sample_municipality_prices,
+        cpi_df,
+        "2024Q4",
+        "1",
+        METRIC_PRICE,
+    )
+    p2m = postal_to_municipality_codes(sample_boundaries)
+    hybrid = classify_hybrid_postal_coverage(postal, METRIC_PRICE, p2m, mun_df)
+    fig = build_hybrid_choropleth_figure(
+        hybrid,
+        mun_df,
+        sample_boundaries,
+        sample_municipality_boundaries,
+        METRIC_PRICE,
+    )
+    assert fig.layout.margin.t >= MAP_TOP_MARGIN
+
+
+def test_hybrid_budget_figure_leaves_room_for_toolbar(
+    sample_prices_frame,
+    sample_boundaries,
+    sample_municipality_prices,
+    sample_municipality_boundaries,
+    cpi_df,
+):
+    size_sqm = 50.0
+    max_affordable = 300_000.0
+    postal = prepare_budget_fit_dataframe(
+        sample_prices_frame,
+        sample_boundaries,
+        "2024Q4",
+        "1",
+        size_sqm,
+        max_affordable,
+        cpi_df=cpi_df,
+    )
+    mun_df, _year = prepare_municipality_map_dataframe(
+        sample_municipality_prices,
+        cpi_df,
+        "2024Q4",
+        "1",
+        METRIC_FITS_BUDGET,
+        size_sqm=size_sqm,
+        max_affordable_price=max_affordable,
+    )
+    fig = build_hybrid_choropleth_figure(
+        postal,
+        mun_df,
+        sample_boundaries,
+        sample_municipality_boundaries,
+        METRIC_FITS_BUDGET,
+    )
+    assert fig.layout.margin.t >= MAP_TOP_MARGIN
