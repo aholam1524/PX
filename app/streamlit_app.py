@@ -37,6 +37,11 @@ from housing_analyzer.data.demographics import attach_demographics_to_summaries
 from housing_analyzer.data.cpi import cpi_by_quarter
 from housing_analyzer.data.paths import use_fixtures
 from housing_analyzer.data.snapshot import snapshot_is_complete
+from housing_analyzer.home_value import (
+    HOME_VALUE_DISCLAIMER,
+    estimate_home_value,
+    indexed_area_chart_from_purchase,
+)
 from housing_analyzer.affordability import (
     AFFORDABILITY_DISCLAIMER,
     down_payment_from_inputs,
@@ -417,6 +422,153 @@ def _render_affordability_tab(
         f"For price **{calc_price:,.0f} EUR** with down payment **{down:,.0f} EUR** "
         f"and loan **{principal:,.0f} EUR**."
     )
+
+
+def _render_my_home_tab(
+    prices: pd.DataFrame,
+    cpi: pd.DataFrame,
+    selected_postal_code: str | None,
+) -> None:
+    st.subheader("My home")
+    st.caption(
+        "See how the area's average price per square metre has moved since you bought, "
+        "and a rough illustration of what your home might be worth now."
+    )
+    st.info(HOME_VALUE_DISCLAIMER)
+
+    catalog = area_catalog(prices)
+    default_code = (
+        str(selected_postal_code).zfill(5)
+        if selected_postal_code
+        else default_selected_postal_code(prices)
+    ) or "00100"
+
+    search_query = st.text_input(
+        "Search by postal code or area name",
+        placeholder="e.g. 00100 or Punavuori",
+        key="my_home_search",
+    )
+    search_hits = search_area_catalog(catalog, search_query)
+    options = sorted(set(catalog["postal_code"].astype(str).str.zfill(5)))
+    if search_hits:
+        options = search_hits + [c for c in options if c not in search_hits]
+    default_index = options.index(default_code) if default_code in options else 0
+    postal_code = st.selectbox(
+        "Postal code",
+        options=options,
+        index=default_index,
+        format_func=lambda c: _format_compare_option(catalog, c),
+        key="my_home_postal",
+    )
+
+    bt_codes = [code for code, _ in building_type_panel_options()]
+    bt_labels = {code: label for code, label in building_type_panel_options()}
+    building_type_code = st.selectbox(
+        "Building type",
+        options=bt_codes,
+        format_func=lambda c: bt_labels[c],
+        key="my_home_building_type",
+    )
+    building_type = resolve_panel_building_type(prices, building_type_code)
+
+    quarters = list_quarters(prices)
+    if not quarters:
+        st.warning("No quarterly price data is available.")
+        return
+    purchase_quarter = st.selectbox(
+        "Purchase quarter",
+        options=quarters,
+        index=max(0, len(quarters) - 5),
+        key="my_home_purchase_quarter",
+    )
+    purchase_price = st.number_input(
+        "Purchase price (EUR)",
+        min_value=0.0,
+        value=250_000.0,
+        step=5_000.0,
+        key="my_home_purchase_price",
+    )
+    size_sqm = st.number_input(
+        "Apartment size (m², optional — shows price per m² you paid)",
+        min_value=0.0,
+        value=0.0,
+        step=1.0,
+        key="my_home_size_sqm",
+    )
+
+    cpi_quarterly = cpi_by_quarter(cpi)
+    result = estimate_home_value(
+        prices,
+        cpi_quarterly,
+        postal_code,
+        building_type,
+        purchase_quarter,
+        float(purchase_price),
+    )
+
+    if not result.enough_data:
+        st.warning(
+            result.notes[0]
+            if result.notes
+            else "Not enough data to estimate how the area has moved since purchase."
+        )
+        for note in result.notes[1:]:
+            st.caption(note)
+        return
+
+    if size_sqm and size_sqm > 0:
+        paid_per_sqm = float(purchase_price) / float(size_sqm)
+        st.caption(f"You paid about **{paid_per_sqm:,.0f} EUR/m²** ({size_sqm:g} m²).")
+
+    st.metric("Estimated value today (illustration)", f"{result.estimated_value:,.0f} EUR")
+    c1, c2 = st.columns(2)
+    c1.metric("Nominal change since purchase", f"{result.nominal_change_pct:+.1f} %")
+    real_label = (
+        f"{result.real_change_pct:+.1f} %"
+        if result.real_change_pct is not None
+        else "—"
+    )
+    c2.metric("Real change (inflation-adjusted)", real_label)
+
+    sales_4q = trailing_sales_count(
+        prices, result.postal_code, result.latest_quarter_used or purchase_quarter, building_type_code
+    )
+    rel_text = reliability_explanation(result.reliability, sales_4q)
+    st.caption(f"**Reliability (latest quarter):** {rel_text}")
+
+    if result.purchase_sales_count is not None or result.latest_sales_count is not None:
+        parts = []
+        if result.purchase_sales_count is not None:
+            parts.append(
+                f"{int(result.purchase_sales_count)} sales in purchase quarter "
+                f"{result.purchase_quarter_used}"
+            )
+        if result.latest_sales_count is not None:
+            parts.append(
+                f"{int(result.latest_sales_count)} sales in latest quarter "
+                f"{result.latest_quarter_used}"
+            )
+        st.caption(" · ".join(parts))
+
+    st.caption(
+        f"Area price **{result.purchase_price_per_sqm:,.0f} EUR/m²** "
+        f"({result.purchase_quarter_used}) → "
+        f"**{result.latest_price_per_sqm:,.0f} EUR/m²** ({result.latest_quarter_used}); "
+        f"index **{result.price_index:.3f}**."
+    )
+
+    if result.purchase_quarter_used and result.latest_quarter_used:
+        fig = indexed_area_chart_from_purchase(
+            prices,
+            result.postal_code,
+            building_type,
+            result.purchase_quarter_used,
+            through_quarter=result.latest_quarter_used,
+        )
+        st.plotly_chart(fig, use_container_width=True, key="my_home_index_chart")
+
+    for note in result.notes:
+        st.caption(note)
 
 
 def _render_relationships_tab(
@@ -842,8 +994,8 @@ _init_compare_session_state()
 
 max_affordable_price = _compute_max_affordable(afford_inputs)
 
-map_tab, afford_tab, compare_tab, relationships_tab = st.tabs(
-    ["Map", "Affordability", "Compare", "Relationships"]
+map_tab, afford_tab, compare_tab, relationships_tab, my_home_tab = st.tabs(
+    ["Map", "Affordability", "Compare", "Relationships", "My home"]
 )
 
 with map_tab:
@@ -1090,6 +1242,13 @@ with compare_tab:
 with relationships_tab:
     _render_relationships_tab(
         prices, quarter, building_type_code, cpi, demographics
+    )
+
+with my_home_tab:
+    _render_my_home_tab(
+        prices,
+        cpi,
+        st.session_state.get("selected_postal_code"),
     )
 
 st.divider()
