@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from housing_analyzer.map import METRIC_CHOICES
+from housing_analyzer.map import METRIC_CHOICES, METRIC_PRICE
 
 ROOT = Path(__file__).resolve().parents[1]
 STREAMLIT_APP = ROOT / "app" / "streamlit_app.py"
@@ -37,6 +37,7 @@ def test_apptest_map_captions_and_full_range_checkbox(monkeypatch):
     captions = _caption_text(at)
     assert "postal-code areas have their own price" in captions
     assert "Municipality values are annual figures" in captions
+    assert "Colour scale is fixed at 0 to 4,000 EUR/m²" in captions
 
 
 def test_apptest_map_default_selection_and_detail_panel(monkeypatch):
@@ -87,3 +88,32 @@ def test_apptest_map_renders_each_metric_layer(monkeypatch):
     for key, _label in METRIC_CHOICES:
         metric_select.set_value(key).run(timeout=60)
         assert not at.exception, f"Map failed for metric {key}"
+
+
+def test_apptest_price_layer_full_range_checkbox(monkeypatch):
+    apptest_mod = importlib.util.find_spec("streamlit.testing.v1")
+    if apptest_mod is None:
+        pytest.skip("streamlit.testing.v1.AppTest not available in this Streamlit version")
+
+    monkeypatch.setenv("HOUSING_USE_FIXTURES", "1")
+
+    from streamlit.testing.v1 import AppTest
+
+    at = AppTest.from_file(str(STREAMLIT_APP))
+    at.run(timeout=60)
+    assert not at.exception
+
+    metric_select = next(
+        sb for sb in at.selectbox if (sb.label or "").startswith("Metric layer")
+    )
+    metric_select.set_value(METRIC_PRICE).run(timeout=60)
+    assert not at.exception
+    assert "Colour scale is fixed at 0 to 4,000 EUR/m²" in _caption_text(at)
+
+    full_range = next(
+        cb for cb in at.checkbox if "Use the full value range" in (cb.label or "")
+    )
+    full_range.set_value(True).run(timeout=60)
+    assert not at.exception
+    captions = _caption_text(at)
+    assert "Colour scale is fixed at 0 to 4,000 EUR/m²" not in captions

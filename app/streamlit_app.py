@@ -1000,10 +1000,16 @@ with map_tab:
                     "sales; the rest are unfilled (outline only) and are never treated as zero."
                 )
             if metric != METRIC_FITS_BUDGET and not use_full_color_range:
-                st.caption(
-                    "Colour scale covers the 2nd to 98th percentile; more extreme areas "
-                    "use the end colours."
-                )
+                if metric == METRIC_PRICE:
+                    st.caption(
+                        "Colour scale is fixed at 0 to 4,000 EUR/m²; more expensive areas "
+                        "use the darkest colour"
+                    )
+                else:
+                    st.caption(
+                        "Colour scale covers the 2nd to 98th percentile; more extreme areas "
+                        "use the end colours."
+                    )
             typical_coverage = typical_quarter_price_coverage(
                 prices, quarter, building_type_code
             )

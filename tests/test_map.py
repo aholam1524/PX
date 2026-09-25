@@ -21,6 +21,7 @@ from housing_analyzer.map import (
     METRIC_FITS_BUDGET,
     METRIC_PRICE,
     METRIC_PRICE_TO_INCOME,
+    PRICE_COLOR_RANGE,
     METRIC_SALES,
     NO_CPI_HOVER,
     NO_DATA_HOVER,
@@ -83,19 +84,25 @@ def test_metric_color_range_pct_change_symmetric():
     assert high == pytest.approx(20.0)
 
 
-def test_metric_color_range_clips_outlier_narrower_than_min_max():
+def test_metric_color_range_price_fixed_default():
+    below = pd.Series([500.0, 1500.0, 2500.0, 3500.0])
+    assert metric_color_range(below, METRIC_PRICE) == PRICE_COLOR_RANGE
+    outlier = pd.Series([1000.0, 1100.0, 1200.0, 1300.0, 50_000.0])
+    assert metric_color_range(outlier, METRIC_PRICE) == PRICE_COLOR_RANGE
+    assert metric_color_range(pd.Series(dtype=float), METRIC_PRICE) == PRICE_COLOR_RANGE
+
+
+def test_metric_color_range_price_full_range_uses_data_min_max():
     values = pd.Series([1000.0, 1100.0, 1200.0, 1300.0, 50_000.0])
-    low_clip, high_clip = metric_color_range(values, METRIC_PRICE)
     low_full, high_full = metric_color_range(values, METRIC_PRICE, use_full_range=True)
     assert low_full == pytest.approx(1000.0)
     assert high_full == pytest.approx(50_000.0)
-    assert high_clip - low_clip < high_full - low_full
 
 
 def test_metric_color_range_percentile_zero_and_hundred_equals_min_max():
     values = pd.Series([10.0, 20.0, 30.0, 40.0])
     low, high = metric_color_range(
-        values, METRIC_PRICE, percentile_low=0, percentile_high=100
+        values, METRIC_SALES, percentile_low=0, percentile_high=100
     )
     assert low == pytest.approx(10.0)
     assert high == pytest.approx(40.0)
@@ -109,10 +116,18 @@ def test_metric_color_range_change_layers_symmetric_with_clip():
 
 
 def test_metric_color_range_empty_and_all_equal():
-    low, high = metric_color_range(pd.Series(dtype=float), METRIC_PRICE)
+    low, high = metric_color_range(pd.Series(dtype=float), METRIC_SALES)
     assert low == 0.0
     assert high == 1.0
+    low, high = metric_color_range(pd.Series([5.0, 5.0, 5.0]), METRIC_SALES)
+    assert low == pytest.approx(5.0)
+    assert high == pytest.approx(6.0)
     low, high = metric_color_range(pd.Series([5.0, 5.0, 5.0]), METRIC_PRICE)
+    assert low == pytest.approx(0.0)
+    assert high == pytest.approx(4000.0)
+    low, high = metric_color_range(
+        pd.Series([5.0, 5.0, 5.0]), METRIC_PRICE, use_full_range=True
+    )
     assert low == pytest.approx(5.0)
     assert high == pytest.approx(6.0)
 
@@ -353,6 +368,27 @@ def test_color_range_ignores_nan(sample_prices_frame, sample_boundaries, cpi_df)
     assert not np.isnan(low)
     assert not np.isnan(high)
     assert low <= high
+
+
+def test_price_choropleth_uses_fixed_z_range_and_colorbar_tick(
+    sample_prices_frame, sample_boundaries, cpi_df
+):
+    frame = prepare_map_dataframe(
+        sample_prices_frame,
+        sample_boundaries,
+        "2024Q4",
+        "all",
+        METRIC_PRICE,
+        cpi_df=cpi_df,
+    )
+    fig = build_choropleth_figure(frame, sample_boundaries, METRIC_PRICE)
+    value_traces = _value_layer_traces(fig)
+    assert value_traces
+    trace = value_traces[0]
+    assert trace.zmin == pytest.approx(0.0)
+    assert trace.zmax == pytest.approx(4000.0)
+    colorbar = trace.colorbar
+    assert list(colorbar.ticktext) == ["0", "1000", "2000", "3000", "4000+"]
 
 
 def test_prepare_map_dataframe_does_not_compute_per_area_summaries(
