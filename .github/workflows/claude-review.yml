@@ -39,9 +39,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: aholam1524/ASD
-          ref: main
+          ref: ${{ vars.ASD_FACTORY_REF || 'main' }}
           path: .asd-factory
           token: ${{ secrets.FACTORY_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
+      - name: Log ASD factory version
+        run: |
+          echo "ASD factory ref: ${{ vars.ASD_FACTORY_REF || 'main' }}"
+          git -C .asd-factory rev-parse HEAD
 
       - name: Build review prompt
         id: build-prompt
