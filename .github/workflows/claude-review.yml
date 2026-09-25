@@ -127,10 +127,6 @@ jobs:
             echo "already_fixed=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Post fix marker
-        if: steps.marker.outputs.already_fixed != 'true'
-        run: gh pr comment "$PR_NUMBER" --body "${{ steps.marker.outputs.marker }}"
-
       - name: Checkout PR head branch
         if: steps.marker.outputs.already_fixed != 'true'
         uses: actions/checkout@v4
@@ -147,6 +143,13 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+      - name: Record head before fix pass
+        if: steps.marker.outputs.already_fixed != 'true'
+        id: head-before
+        run: |
+          git fetch origin dev
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Build fix prompt
         if: steps.marker.outputs.already_fixed != 'true'
         id: build-fix-prompt
@@ -156,6 +159,8 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
+          set -euo pipefail
+          GITHUB_CHANGED="$(git diff --name-only origin/dev...HEAD | grep '^\.github/' || true)"
           cat > /tmp/fix-prompt.md <<'EOF'
           You are applying one automated fix pass after Claude review on this pull request.
 
@@ -166,12 +171,28 @@ jobs:
           Rules:
           - Work on the existing PR head branch only; do not create a new branch.
           - Do not open pull requests, merge, or change labels.
-          - Do not edit `.github/`, `.cursor/`, or anything under `.asd-factory/` (ASD factory).
+          - Do not edit `.cursor/` or anything under `.asd-factory/` (ASD factory).
+          - Do not create new workflow files or other new files under `.github/`.
+          - You may edit a file under `.github/` only if it appears in the "GitHub files changed by this PR" list below; never edit other `.github/` paths.
           - Use `git add`, `git commit`, and `git push` only for your fixes on this branch.
-          - You may use `gh pr view` and `gh pr comment` to read the PR and post a brief summary if helpful.
-          - Read the review comments first, make the fixes, and stop.
+          - You may use `gh pr view` and `gh pr comment` to read the PR.
+          - Read the review comments first, make the fixes, then finish with the Fix pass result comment (required).
+
+          ## Fix pass result comment (required)
+
+          Before you stop, post **one** PR comment (`gh pr comment`) whose body starts with the heading `## Fix pass result` and includes a markdown table with one row per review finding (or state clearly if the review had no findings). Columns: finding (short summary), status (`fixed` or `not fixed`), details (commit SHA or reason such as "out of scope" or "disagree").
+
+          End that comment with **exactly one** of these HTML markers on its own line:
+          - `<!-- factory:fix-result:all-addressed -->` when every finding is fixed or legitimately not fixed with no remaining actionable issues.
+          - `<!-- factory:fix-result:open-findings -->` when any finding remains unaddressed and should block merge if the repo is configured to block on open findings.
           EOF
           {
+            printf '\n\n## GitHub files changed by this PR\n\n'
+            if [[ -z "$GITHUB_CHANGED" ]]; then
+              printf '_None — do not edit any file under `.github/`._\n'
+            else
+              printf '%s\n' "$GITHUB_CHANGED"
+            fi
             printf '\n\n## Pull request\n\n'
             printf 'Number: %s\n' "$PR_NUMBER"
             printf 'Title: %s\n' "$PR_TITLE"
@@ -198,6 +219,28 @@ jobs:
             --model claude-sonnet-5
             --max-turns 40
             --allowedTools "Read,Edit,Write,Glob,Grep,Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(pytest:*),Bash(python:*),Bash(npm:*),Bash(npx:*),Bash(make:*),Bash(cargo:*),Bash(go test:*),Bash(go:*)"
+
+      - name: Post fix marker
+        if: steps.marker.outputs.already_fixed != 'true' && steps.claude_fix.outcome == 'success'
+        run: gh pr comment "$PR_NUMBER" --body "${{ steps.marker.outputs.marker }}"
+
+      - name: Report fix pass commits
+        if: always() && steps.marker.outputs.already_fixed != 'true'
+        continue-on-error: true
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          BEFORE_SHA: ${{ steps.head-before.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git fetch origin "$HEAD_REF"
+          AFTER_SHA="$(git rev-parse "origin/$HEAD_REF")"
+          if [[ "$BEFORE_SHA" == "$AFTER_SHA" ]]; then
+            gh pr comment "$PR_NUMBER" --body "Fix pass pushed no commits"
+          else
+            COUNT="$(git rev-list --count "$BEFORE_SHA..$AFTER_SHA")"
+            SUBJECTS="$(git log --format='%s' "$BEFORE_SHA..$AFTER_SHA" | paste -sd '; ' -)"
+            gh pr comment "$PR_NUMBER" --body "Fix pass pushed ${COUNT} commit(s): ${SUBJECTS}"
+          fi
 
       - name: Post factory usage report
         if: always()
@@ -230,8 +273,22 @@ jobs:
       - name: Wait for checks and merge into dev
         env:
           GH_TOKEN: ${{ secrets.FACTORY_GITHUB_TOKEN }}
+          BLOCK_ON_OPEN: ${{ vars.FACTORY_BLOCK_ON_OPEN_FINDINGS }}
         run: |
           set -euo pipefail
+          COMMENTS="$(gh pr view "$PR_NUMBER" --json comments --jq '.comments[].body')"
+          FIX_RESULT="all-addressed"
+          if grep -Fq '<!-- factory:fix-result:open-findings -->' <<< "$COMMENTS"; then
+            FIX_RESULT="open-findings"
+          elif grep -Fq '<!-- factory:fix-result:all-addressed -->' <<< "$COMMENTS"; then
+            FIX_RESULT="all-addressed"
+          fi
+
+          if [[ "$FIX_RESULT" == "open-findings" && "$BLOCK_ON_OPEN" == "true" ]]; then
+            gh pr comment "$PR_NUMBER" --body "Factory: this PR was left open because review findings remain unaddressed (see **Fix pass result**). Merge manually after resolving them, or update the fix pass outcome."
+            exit 0
+          fi
+
           HEAD_SHA="$(gh pr view "$PR_NUMBER" --json headRefOid -q .headRefOid)"
 
           FACTORY_CI_RUN=""
@@ -255,6 +312,10 @@ jobs:
           if ! gh pr merge "$PR_NUMBER" --merge; then
             gh pr comment "$PR_NUMBER" --body "Factory: automatic merge into \`dev\` failed (for example the PR may already be merged or checks regressed). Please merge manually if the PR is still open and CI is green."
             exit 0
+          fi
+
+          if [[ "$FIX_RESULT" == "open-findings" ]]; then
+            gh pr comment "$PR_NUMBER" --body "Factory: merged into \`dev\` with open review findings (\`FACTORY_BLOCK_ON_OPEN_FINDINGS\` is not \`true\`)."
           fi
 
       - uses: actions/checkout@v4
@@ -313,7 +374,7 @@ jobs:
           FAILED_LIST="$(IFS=', '; echo "${FAILED_JOBS[*]}")"
           RUN_URL="${SERVER_URL}/${REPOSITORY}/actions/runs/${RUN_ID}"
 
-          BODY="$(printf '%s\n\nFactory: the **Claude review** workflow failed.\n\nFailed jobs: %s\nRun: %s\n\nThe owner needs to look at the failure. Add the agent-review label again to retry (the fix-once marker still applies).' "$MARKER" "$FAILED_LIST" "$RUN_URL")"
+          BODY="$(printf '%s\n\nFactory: the **Claude review** workflow failed.\n\nFailed jobs: %s\nRun: %s\n\nThe owner needs to look at the failure. Add the **agent-review** label again to retry. If the **fix** job failed, no fix-once marker was posted, so the fix pass will run again. If a previous run completed the fix job successfully, the fix-once marker prevents a second fix pass until you remove that marker comment or merge without it.' "$MARKER" "$FAILED_LIST" "$RUN_URL")"
           gh pr comment "$PR_NUMBER" --body "$BODY"
 
       - name: Mark linked issue factory-blocked
