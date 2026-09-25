@@ -10,6 +10,7 @@ import pytest
 
 from housing_analyzer.data import prices as prices_mod
 from housing_analyzer.data.prices import (
+    PxWebError,
     fetch_prices,
     load_prices,
     parse_json_stat2,
@@ -124,6 +125,46 @@ def test_fetch_prices_uses_chunked_fake_api():
     expected_calls = len(plan_fetch_queries(metadata, max_cells=prices_mod.DEFAULT_MAX_CELLS))
     assert len(calls) == expected_calls
     assert not frame.empty
+
+
+def test_quarter_period_end_rejects_malformed_quarter():
+    with pytest.raises(ValueError):
+        prices_mod._quarter_period_end("not-a-quarter")
+
+
+def test_default_post_raises_pxweb_error_on_non_200(monkeypatch):
+    class FakeResponse:
+        status_code = 500
+        text = "internal error"
+
+    monkeypatch.setattr(
+        prices_mod.requests, "post", lambda *args, **kwargs: FakeResponse()
+    )
+    with pytest.raises(PxWebError):
+        prices_mod._default_post("http://example.invalid", {})
+
+
+def test_default_get_metadata_raises_pxweb_error_on_non_200(monkeypatch):
+    class FakeResponse:
+        status_code = 500
+        text = "internal error"
+
+    monkeypatch.setattr(
+        prices_mod.requests, "get", lambda *args, **kwargs: FakeResponse()
+    )
+    with pytest.raises(PxWebError):
+        prices_mod._default_get_metadata("http://example.invalid")
+
+
+def test_variable_by_code_raises_when_variable_missing():
+    metadata = {"variables": [{"code": "other", "values": []}]}
+    with pytest.raises(PxWebError):
+        prices_mod._variable_by_code(metadata, prices_mod.VAR_TIME)
+
+
+def test_metadata_variables_raises_when_variables_missing():
+    with pytest.raises(PxWebError):
+        prices_mod._metadata_variables({})
 
 
 def test_load_prices_uses_cache(tmp_path, monkeypatch):

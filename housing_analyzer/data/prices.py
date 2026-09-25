@@ -15,10 +15,6 @@ import requests
 API_URL = (
     "https://pxdata.stat.fi/PxWeb/api/v1/en/StatFin/ashi/13mt.px"
 )
-TABLE_TITLE = (
-    "Prices per square meter of old dwellings in housing companies and "
-    "numbers of transactions by postal code area, quarterly"
-)
 
 VAR_TIME = "timeperiod_q"
 VAR_POSTAL = "postinumeroalue_4_20220101"
@@ -314,6 +310,15 @@ def _default_post(url: str, payload: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
+def _default_get_metadata(url: str) -> dict[str, Any]:
+    response = requests.get(url, timeout=60)
+    if response.status_code != 200:
+        raise PxWebError(
+            f"PxWeb metadata request failed ({response.status_code}): {response.text[:500]}"
+        )
+    return response.json()
+
+
 def fetch_prices(
     *,
     refresh: bool = False,
@@ -326,7 +331,7 @@ def fetch_prices(
     del refresh  # cache is handled by load_prices()
 
     post = post_json or _default_post
-    get_meta = get_metadata or (lambda url: requests.get(url, timeout=60).json())
+    get_meta = get_metadata or _default_get_metadata
 
     try:
         metadata = get_meta(api_url)
