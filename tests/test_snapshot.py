@@ -12,6 +12,7 @@ from housing_analyzer.data import boundaries as boundaries_mod
 from housing_analyzer.data import prices as prices_mod
 from housing_analyzer.data.boundaries import load_boundaries
 from housing_analyzer.data import paths as data_paths
+from housing_analyzer.data.municipalities import parse_municipality_json_stat2
 from housing_analyzer.data.paths import MAX_SNAPSHOT_TOTAL_BYTES
 from housing_analyzer.data.prices import load_prices, parse_json_stat2
 from housing_analyzer.data.snapshot import (
@@ -24,6 +25,8 @@ from housing_analyzer.data.snapshot import (
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 PRICES_SAMPLE = FIXTURES / "prices_sample.json"
 BOUNDARIES_SAMPLE = FIXTURES / "boundaries_sample.geojson"
+MUNICIPALITY_PRICES_SAMPLE = FIXTURES / "municipality_prices_sample.json"
+MUNICIPALITY_BOUNDARIES_SAMPLE = FIXTURES / "municipality_boundaries_sample.geojson"
 
 
 @pytest.fixture
@@ -39,6 +42,14 @@ def snapshot_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(data_paths, "CPI_SNAPSHOT_FILE", snap / "cpi.csv.gz")
     monkeypatch.setattr(
         data_paths, "DEMOGRAPHICS_SNAPSHOT_FILE", snap / "demographics.csv.gz"
+    )
+    monkeypatch.setattr(
+        data_paths, "MUNICIPALITY_PRICES_SNAPSHOT_FILE", snap / "municipality_prices.csv.gz"
+    )
+    monkeypatch.setattr(
+        data_paths,
+        "MUNICIPALITY_BOUNDARIES_SNAPSHOT_FILE",
+        snap / "municipalities.geojson.gz",
     )
     return snap
 
@@ -67,6 +78,8 @@ def test_build_manifest_fields():
     assert manifest["fetch_date"]
     assert manifest["total_bytes"] == 3100
     assert "demographics.csv.gz" in manifest["files"]
+    assert "municipality_prices.csv.gz" in manifest["files"]
+    assert "municipalities.geojson.gz" in manifest["files"]
     assert manifest["files"]["prices.csv.gz"]["rows"] == 10
     assert manifest["files"]["boundaries.geojson.gz"]["features"] == 3
     assert "boundary_edition" in manifest["files"]["boundaries.geojson.gz"]
@@ -92,6 +105,18 @@ def sample_cpi_frame() -> pd.DataFrame:
             "cpi": [100.0, 101.0, 102.0],
         }
     )
+
+
+@pytest.fixture
+def sample_municipality_prices_frame() -> pd.DataFrame:
+    with MUNICIPALITY_PRICES_SAMPLE.open(encoding="utf-8") as handle:
+        return parse_municipality_json_stat2(json.load(handle))
+
+
+@pytest.fixture
+def sample_municipality_boundaries() -> dict:
+    with MUNICIPALITY_BOUNDARIES_SAMPLE.open(encoding="utf-8") as handle:
+        return json.load(handle)
 
 
 @pytest.fixture
@@ -129,6 +154,49 @@ def test_write_snapshot_and_load_manifest(
     assert loaded is not None
     assert loaded["total_bytes"] == manifest["total_bytes"]
     assert loaded["files"]["prices.csv.gz"]["rows"] == len(sample_prices_frame)
+
+
+def test_write_snapshot_with_municipality_data(
+    snapshot_dir,
+    sample_prices_frame,
+    sample_boundaries,
+    sample_cpi_frame,
+    sample_demographics_frame,
+    sample_municipality_prices_frame,
+    sample_municipality_boundaries,
+):
+    manifest = write_snapshot(
+        sample_prices_frame,
+        sample_boundaries,
+        sample_cpi_frame,
+        sample_demographics_frame,
+        sample_municipality_prices_frame,
+        sample_municipality_boundaries,
+    )
+    assert data_paths.MUNICIPALITY_PRICES_SNAPSHOT_FILE.is_file()
+    assert data_paths.MUNICIPALITY_BOUNDARIES_SNAPSHOT_FILE.is_file()
+
+    mun_prices_entry = manifest["files"]["municipality_prices.csv.gz"]
+    assert mun_prices_entry["rows"] == len(sample_municipality_prices_frame)
+    assert mun_prices_entry["years"] == sorted(
+        int(y) for y in sample_municipality_prices_frame["year"].unique()
+    )
+
+    mun_boundaries_entry = manifest["files"]["municipalities.geojson.gz"]
+    assert mun_boundaries_entry["features"] == len(
+        sample_municipality_boundaries["features"]
+    )
+
+    loaded = load_manifest()
+    assert loaded is not None
+    assert (
+        loaded["files"]["municipality_prices.csv.gz"]["rows"]
+        == mun_prices_entry["rows"]
+    )
+    assert (
+        loaded["files"]["municipalities.geojson.gz"]["features"]
+        == mun_boundaries_entry["features"]
+    )
 
 
 def test_load_prices_reads_snapshot(

@@ -29,6 +29,14 @@ from housing_analyzer.data.demographics import (
     fetch_demographics,
     load_demographics,
 )
+from housing_analyzer.data.municipalities import (
+    API_URL as MUNICIPALITY_API_URL,
+    apply_municipality_names_to_boundaries,
+    build_municipality_boundaries,
+    fetch_municipality_prices,
+    load_municipality_prices,
+    municipality_join_report,
+)
 from housing_analyzer.data.prices import API_URL, fetch_prices, load_prices
 
 DEMOGRAPHICS_SOURCE_NOTE = (
@@ -102,6 +110,20 @@ def _write_demographics_snapshot(frame: pd.DataFrame, path: Path) -> int:
     return path.stat().st_size
 
 
+def _write_municipality_prices_snapshot(frame: pd.DataFrame, path: Path) -> int:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    frame.to_csv(path, index=False, compression="gzip")
+    return path.stat().st_size
+
+
+def _write_municipality_boundaries_snapshot(collection: dict[str, Any], path: Path) -> int:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(collection, ensure_ascii=False, separators=(",", ":"))
+    with gzip.open(path, "wt", encoding="utf-8") as handle:
+        handle.write(payload)
+    return path.stat().st_size
+
+
 def _write_boundaries_snapshot(collection: dict[str, Any], path: Path) -> int:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(collection, ensure_ascii=False, separators=(",", ":"))
@@ -120,6 +142,11 @@ def build_manifest(
     cpi_bytes: int = 0,
     demographics_rows: int = 0,
     demographics_bytes: int = 0,
+    municipality_prices_rows: int = 0,
+    municipality_prices_bytes: int = 0,
+    municipality_prices_years: list[int] | None = None,
+    municipality_boundaries_features: int = 0,
+    municipality_boundaries_bytes: int = 0,
     fetch_date: date | None = None,
 ) -> dict[str, Any]:
     """Build manifest metadata for a snapshot directory."""
@@ -153,8 +180,28 @@ def build_manifest(
             },
             "data_year": DEFAULT_DATA_YEAR,
         },
+        "municipality_prices.csv.gz": {
+            "bytes": municipality_prices_bytes,
+            "rows": municipality_prices_rows,
+            "source_url": MUNICIPALITY_API_URL,
+            "table_id": "13mx.px",
+            "years": municipality_prices_years or [],
+        },
+        "municipalities.geojson.gz": {
+            "bytes": municipality_boundaries_bytes,
+            "features": municipality_boundaries_features,
+            "source_url": BOUNDARIES_SOURCE_URL,
+            "derived_from": "boundaries.geojson.gz",
+        },
     }
-    total = prices_bytes + boundaries_bytes + cpi_bytes + demographics_bytes
+    total = (
+        prices_bytes
+        + boundaries_bytes
+        + cpi_bytes
+        + demographics_bytes
+        + municipality_prices_bytes
+        + municipality_boundaries_bytes
+    )
     return {
         "fetch_date": when.isoformat(),
         "files": files,
@@ -167,6 +214,8 @@ def write_snapshot(
     boundaries: dict[str, Any],
     cpi: pd.DataFrame,
     demographics: pd.DataFrame,
+    municipality_prices: pd.DataFrame | None = None,
+    municipality_boundaries: dict[str, Any] | None = None,
     *,
     fetch_date: date | None = None,
 ) -> dict[str, Any]:
@@ -179,7 +228,22 @@ def write_snapshot(
     demographics_bytes = _write_demographics_snapshot(
         demographics, data_paths.DEMOGRAPHICS_SNAPSHOT_FILE
     )
+
+    mun_prices = municipality_prices if municipality_prices is not None else pd.DataFrame()
+    mun_boundaries = municipality_boundaries
+    if mun_boundaries is None:
+        mun_boundaries = {"type": "FeatureCollection", "features": []}
+
+    municipality_prices_bytes = _write_municipality_prices_snapshot(
+        mun_prices, data_paths.MUNICIPALITY_PRICES_SNAPSHOT_FILE
+    )
+    municipality_boundaries_bytes = _write_municipality_boundaries_snapshot(
+        mun_boundaries, data_paths.MUNICIPALITY_BOUNDARIES_SNAPSHOT_FILE
+    )
+
     features = boundaries.get("features") or []
+    mun_features = mun_boundaries.get("features") or []
+    years = sorted({int(y) for y in mun_prices["year"].unique()}) if not mun_prices.empty else []
     manifest = build_manifest(
         prices_rows=len(prices),
         prices_bytes=prices_bytes,
@@ -189,6 +253,11 @@ def write_snapshot(
         cpi_bytes=cpi_bytes,
         demographics_rows=len(demographics),
         demographics_bytes=demographics_bytes,
+        municipality_prices_rows=len(mun_prices),
+        municipality_prices_bytes=municipality_prices_bytes,
+        municipality_prices_years=years,
+        municipality_boundaries_features=len(mun_features),
+        municipality_boundaries_bytes=municipality_boundaries_bytes,
         fetch_date=fetch_date,
     )
     data_paths.SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
@@ -206,12 +275,28 @@ def build_snapshot(*, refresh: bool = True) -> dict[str, Any]:
         boundaries = fetch_boundaries()
         cpi = fetch_cpi()
         demographics = fetch_demographics()
+        municipality_prices = fetch_municipality_prices()
     else:
         prices = load_prices(refresh=False)
         boundaries = load_boundaries(refresh=False)
         cpi = load_cpi(refresh=False)
         demographics = load_demographics(refresh=False)
-    return write_snapshot(prices, boundaries, cpi, demographics)
+        municipality_prices = load_municipality_prices(refresh=False)
+
+    municipality_boundaries = build_municipality_boundaries(boundaries)
+    municipality_boundaries = apply_municipality_names_to_boundaries(
+        municipality_boundaries, municipality_prices
+    )
+    municipality_join_report(municipality_prices, municipality_boundaries)
+
+    return write_snapshot(
+        prices,
+        boundaries,
+        cpi,
+        demographics,
+        municipality_prices,
+        municipality_boundaries,
+    )
 
 
 def _format_size(num_bytes: int) -> str:
