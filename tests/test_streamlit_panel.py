@@ -52,6 +52,49 @@ def test_apptest_detail_panel_with_fixtures(monkeypatch):
     assert "00100" in joined or "Area detail" in joined
 
 
+_DETAIL_PANEL_METRIC_LABELS = frozenset(
+    {
+        "Price per m² (EUR)",
+        "1-year change",
+        "5-year change",
+        "Sales (4 quarters)",
+        "Rank",
+        "Percentile",
+    }
+)
+
+
+def test_apptest_detail_panel_metrics_not_truncated(monkeypatch):
+    apptest_mod = importlib.util.find_spec("streamlit.testing.v1")
+    if apptest_mod is None:
+        pytest.skip("streamlit.testing.v1.AppTest not available in this Streamlit version")
+
+    monkeypatch.setenv("HOUSING_USE_FIXTURES", "1")
+
+    from streamlit.testing.v1 import AppTest
+
+    at = AppTest.from_file(str(STREAMLIT_APP))
+    at.session_state["selected_postal_code"] = "00100"
+    at.run(timeout=60)
+    assert not at.exception
+
+    panel_metrics = [
+        m
+        for m in at.metric
+        if (m.label or "") in _DETAIL_PANEL_METRIC_LABELS
+    ]
+    assert len(panel_metrics) == 6
+
+    for metric in panel_metrics:
+        label = metric.label or ""
+        value = str(metric.value or "")
+        assert len(label) <= 20, f"label too long: {label!r}"
+        assert len(value) <= 12, f"value too long: {value!r}"
+
+    header_md = " ".join(getattr(el, "value", "") or "" for el in at.markdown)
+    assert "· (" not in header_md
+
+
 def test_apptest_relationships_tab_with_fixtures(monkeypatch):
     apptest_mod = importlib.util.find_spec("streamlit.testing.v1")
     if apptest_mod is None:

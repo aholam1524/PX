@@ -70,6 +70,7 @@ from housing_analyzer.panel import (
     build_trend_figure,
     building_type_panel_options,
     flag_unusual_quarter_changes,
+    format_area_header,
     municipality_name_from_prices,
     quarterly_area_prices,
     quarterly_transaction_counts,
@@ -565,46 +566,65 @@ def _render_detail_panel(
     municipality = municipality_name_from_prices(prices, code)
     bt_display = _format_building_type_display(prices, panel_bt_code)
 
-    header_bits = [f"**{code}**", area_name]
-    if municipality:
-        header_bits.append(f"({municipality})")
-    st.markdown(" · ".join(header_bits))
+    st.markdown(
+        format_area_header(code, area_name if area_name != "—" else "", municipality)
+    )
     st.caption(f"Quarter **{quarter}** · {bt_display}")
+
+    st.markdown(
+        """
+        <style>
+        div[data-testid="stMetric"] [data-testid="stMetricValue"] {
+            font-size: 1.35rem;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
     sales_4q = trailing_sales_count(prices, code, quarter, panel_bt_code)
     rel_text = reliability_explanation(summary.get("reliability"), sales_4q)
 
-    c1, c2, c3 = st.columns(3)
     price = summary["price_per_sqm"]
-    c1.metric(
-        "Price per m²",
-        f"{price:,.0f} EUR/m²" if price == price else "No data",
-    )
     yoy = summary["pct_change_1y"]
+    five = summary["pct_change_5y"]
+    rank = summary.get("rank")
+    pct = summary.get("percentile")
+
+    c1, c2 = st.columns(2)
+    c1.metric(
+        "Price per m² (EUR)",
+        f"{price:,.0f}" if price == price else "No data",
+        help="Nominal price per square metre for the selected quarter and building type.",
+    )
     c2.metric(
         "1-year change",
         f"{yoy:+.1f}%" if yoy == yoy else "—",
+        help="Change in price per m² versus the same quarter one year earlier.",
     )
-    five = summary["pct_change_5y"]
+
+    c3, c4 = st.columns(2)
     c3.metric(
         "5-year change",
         f"{five:+.1f}%" if five == five else "—",
+        help="Change in price per m² versus the same quarter five years earlier.",
+    )
+    c4.metric(
+        "Sales (4 quarters)",
+        str(int(round(sales_4q))) if sales_4q == sales_4q else "—",
+        help="Sales in the last four quarters.",
     )
 
-    c4, c5, c6 = st.columns(3)
-    c4.metric(
-        "Sales (last 4 quarters)",
-        str(int(round(sales_4q))) if sales_4q == sales_4q else "—",
-    )
-    rank = summary.get("rank")
-    pct = summary.get("percentile")
+    c5, c6 = st.columns(2)
     c5.metric(
-        "Rank among areas",
+        "Rank",
         str(int(rank)) if pd.notna(rank) else "—",
+        help="Rank among all areas in this quarter; 1 = most expensive.",
     )
     c6.metric(
         "Percentile",
         f"{pct:.0f}th" if pct == pct else "—",
+        help="Percentile among all areas in this quarter (higher = more expensive).",
     )
     st.caption(rel_text)
 
@@ -761,7 +781,7 @@ with map_tab:
     if "selected_postal_code" not in st.session_state:
         st.session_state.selected_postal_code = None
 
-    map_col, detail_col = st.columns([3, 2])
+    map_col, detail_col = st.columns([5, 4])
 
     with map_col:
         search_query = st.text_input(
