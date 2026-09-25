@@ -113,9 +113,13 @@ def test_join_keeps_missing_prices_missing(sample_boundaries, sample_prices_fram
 def test_load_boundaries_uses_cache(tmp_path, monkeypatch):
     cache_file = tmp_path / "housing_boundaries.geojson"
     edition_file = tmp_path / "housing_boundaries_edition.txt"
+    from housing_analyzer.data import paths as data_paths
+
+    missing_snapshot = tmp_path / "no_boundaries.geojson.gz"
     monkeypatch.setattr(boundaries_mod, "CACHE_DIR", tmp_path)
     monkeypatch.setattr(boundaries_mod, "CACHE_FILE", cache_file)
     monkeypatch.setattr(boundaries_mod, "EDITION_FILE", edition_file)
+    monkeypatch.setattr(data_paths, "BOUNDARIES_SNAPSHOT_FILE", missing_snapshot)
 
     with BOUNDARIES_SAMPLE.open(encoding="utf-8") as handle:
         cached = json.load(handle)
