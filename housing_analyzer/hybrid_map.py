@@ -570,7 +570,10 @@ def build_hybrid_choropleth_figure(
 
     if "coverage" not in postal_df.columns:
         postal_df = classify_hybrid_postal_coverage(
-            postal_df, metric, {}, municipality_df
+            postal_df,
+            metric,
+            postal_to_municipality_codes(postal_boundaries),
+            municipality_df,
         )
 
     with_data = postal_df.loc[postal_df["coverage"] == "postal"].copy()
@@ -705,7 +708,10 @@ def _build_hybrid_budget_figure(
 ) -> go.Figure:
     if "coverage" not in postal_df.columns:
         postal_df = classify_hybrid_postal_coverage(
-            postal_df, METRIC_FITS_BUDGET, {}, municipality_df
+            postal_df,
+            METRIC_FITS_BUDGET,
+            postal_to_municipality_codes(postal_boundaries),
+            municipality_df,
         )
 
     fig = go.Figure()
