@@ -25,6 +25,16 @@ Postal-code area boundaries for the map come from Statistics Finland’s WFS ser
 
 Parsed downloads are cached under `data/raw/` (git-ignored).
 
+### Analysis
+
+Pure helpers in `housing_analyzer/analysis/` turn the tidy price table into map and panel metrics. They never call the network and never modify the input DataFrame.
+
+- **Percentage change** (`pct_change`): For each postal-code area and building type, compares the price in a quarter to the price **four calendar quarters earlier** (one year when `quarters=4`, five years when `quarters=20`). If either price is missing, the change is missing—not zero.
+- **Reliability** (`reliability`): Labels each row using transaction counts in a trailing window (default: sum of the last four quarters). `"ok"` means enough transactions for a stable average; `"low"` means fewer; `"none"` means the price itself is missing; `"unknown"` applies to quarters before 2020, when public transaction counts are not available.
+- **Rank and percentile** (`rank_percentile`): For one quarter, ranks areas by price (1 = most expensive). Areas without a price are not ranked. Tied prices share the same rank. When no single building type is chosen, the area price is a **transaction-weighted** average across types that have transaction counts; if none do, a simple mean of available prices is used—the result includes which method was applied.
+- **Regional average** (`regional_average`): For a caller-supplied mapping from postal codes to groups (for example municipalities), computes a group average for one quarter. Uses transaction-weighted averaging across areas when weights exist; otherwise falls back to a simple mean, and records which method was used.
+- **Area summary** (`summarize_area`): One dict with price, one- and five-year changes, reliability, rank, and percentile for a selected area and quarter.
+
 Nothing in this repository is investment advice.
 
 Describe the work in Cursor chat in this repo. The agent files a GitHub issue; that **queues** the work (label `factory-queued`). You run **Start factory** in Actions to begin Dev on the oldest queued issue. Code moves `feature/N-slug` → `dev` → `test` → `main`. After review, the feature PR merges into `dev` automatically when Factory CI is green; you merge into `main`. Merge into `test` is automatic when the Test agent reports PASS and CI is green.
