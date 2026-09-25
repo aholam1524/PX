@@ -75,6 +75,24 @@ def _cached_map_frame(_prices, _boundaries, quarter, building_type_code, metric)
     return prepare_map_dataframe(_prices, _boundaries, quarter, building_type_code, metric)
 
 
+@st.cache_data(show_spinner=False)
+def _cached_trend_chart_data(_prices, _boundaries, postal_code, building_type, index_to_100):
+    """Trend chart series for one area/building-type/index selection (see _cached_map_frame)."""
+    return build_trend_chart_data(
+        _prices, _boundaries, postal_code, building_type, index_to_100=index_to_100
+    )
+
+
+@st.cache_data(show_spinner=False)
+def _cached_area_prices(_prices, postal_code, building_type):
+    return quarterly_area_prices(_prices, postal_code, building_type)
+
+
+@st.cache_data(show_spinner=False)
+def _cached_transaction_counts(_prices, postal_code, building_type):
+    return quarterly_transaction_counts(_prices, postal_code, building_type)
+
+
 def _friendly_load_error(exc: BaseException) -> str:
     return f"Could not load housing data: {exc}"
 
@@ -162,12 +180,12 @@ def _render_detail_panel(
     )
     st.caption(rel_text)
 
-    trend_data = build_trend_chart_data(
+    trend_data = _cached_trend_chart_data(
         prices,
         boundaries,
         code,
         panel_bt_label,
-        index_to_100=index_mode,
+        index_mode,
     )
     trend_fig = build_trend_figure(trend_data, area_label=f"{code} {area_name}".strip())
     st.plotly_chart(trend_fig, use_container_width=True, key=f"trend_{code}")
@@ -178,20 +196,20 @@ def _render_detail_panel(
             "is missing from the boundary data for this area."
         )
 
-    area_series = quarterly_area_prices(prices, code, panel_bt_label)
+    area_series = _cached_area_prices(prices, code, panel_bt_label)
     unusual = flag_unusual_quarter_changes(area_series)
     if unusual:
         st.markdown("**Unusual quarter-on-quarter movements**")
         for item in unusual:
             st.write(
                 f"- **{item['quarter']}**: {item['pct_change_qoq']:+.1f}% change "
-                f"(typical spread ±{item['std_qoq'] * 3:.1f}% for this area)"
+                f"(typical spread ±{item['threshold_qoq']:.1f}% for this area)"
             )
         st.caption(
             "Small sample sizes can produce sharp spikes; treat flagged quarters with caution."
         )
 
-    sales_counts = quarterly_transaction_counts(prices, code, panel_bt_label)
+    sales_counts = _cached_transaction_counts(prices, code, panel_bt_label)
     if not sales_counts.empty:
         st.plotly_chart(
             build_sales_volume_figure(sales_counts),

@@ -101,6 +101,9 @@ def test_flag_unusual_detects_spike():
     flagged = flag_unusual_quarter_changes(series)
     assert flagged
     assert flagged[-1]["quarter"] == labels[-1]
+    assert flagged[-1]["threshold_qoq"] == pytest.approx(
+        3.0 * flagged[-1]["std_qoq"]
+    )
 
 
 def test_build_trend_chart_data_municipality_unavailable(sample_prices_frame, sample_boundaries):

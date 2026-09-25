@@ -97,7 +97,6 @@ def area_display_name(prices_df: pd.DataFrame, postal_code: str) -> str:
         prices_df["postal_code"].astype(str).str.zfill(5) == code, "area_name"
     ]
     if rows.empty:
-        props = {}
         return ""
     name = str(rows.iloc[0])
     return _MUNICIPALITY_SUFFIX.sub("", name).strip()
@@ -241,6 +240,7 @@ def flag_unusual_quarter_changes(
                     "pct_change_qoq": float(change),
                     "mean_qoq": mean,
                     "std_qoq": std,
+                    "threshold_qoq": threshold,
                 }
             )
     return flagged
