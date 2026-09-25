@@ -85,6 +85,14 @@ In the repo: Settings → Actions → General → Workflow permissions → **Rea
 
 You do not approve workflow runs. You only merge PRs into `main` after Test on the `dev` → `test` promotion PR.
 
+## Factory version
+
+Repository variable **`ASD_FACTORY_REF`** selects which revision of [aholam1524/ASD](https://github.com/aholam1524/ASD) the workflows check out into `.asd-factory/`. It can be a tag, branch name, or full commit SHA. Set it under **Settings → Secrets and variables → Actions → Variables**. If it is unset, workflows use ASD `main` (same as before).
+
+After an ASD change lands on `main` and you have tried it in PX, set `ASD_FACTORY_REF` to that commit SHA to pin the factory until you deliberately change the variable to upgrade.
+
+Each factory workflow run logs the resolved ref and the checked-out commit (`git -C .asd-factory rev-parse HEAD`) right after the ASD checkout.
+
 ## How to start
 
 1. Open [Start factory](https://github.com/aholam1524/PX/actions/workflows/start-factory.yml) in GitHub Actions.
