@@ -13,6 +13,8 @@ pip install -r requirements.txt
 streamlit run app/streamlit_app.py
 ```
 
+You can start the app from any working directory; `app/streamlit_app.py` adds the repository root to Python’s import path automatically.
+
 **Run without network or snapshot** (small fixture data under `tests/fixtures/`):
 
 ```bash
