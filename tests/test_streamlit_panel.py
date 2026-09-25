@@ -50,3 +50,28 @@ def test_apptest_detail_panel_with_fixtures(monkeypatch):
     ]
     joined = " ".join(chunks)
     assert "00100" in joined or "Area detail" in joined
+
+
+def test_apptest_compare_tab_with_fixtures(monkeypatch):
+    apptest_mod = importlib.util.find_spec("streamlit.testing.v1")
+    if apptest_mod is None:
+        pytest.skip("streamlit.testing.v1.AppTest not available in this Streamlit version")
+
+    monkeypatch.setenv("HOUSING_USE_FIXTURES", "1")
+
+    from streamlit.testing.v1 import AppTest
+
+    at = AppTest.from_file(str(STREAMLIT_APP))
+    at.run(timeout=60)
+    assert not at.exception
+
+    if not at.tabs:
+        pytest.skip("AppTest tabs not available in this Streamlit version")
+
+    at.tabs[1].run(timeout=60)
+    assert not at.exception
+
+    body = " ".join(getattr(el, "value", "") or "" for el in at.subheader)
+    assert "Compare" in body or any(
+        "Compare areas" in (getattr(el, "value", "") or "") for el in at.subheader
+    )
