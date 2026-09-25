@@ -43,9 +43,11 @@ def _is_pre_2020(quarter: str) -> bool:
 
 def _aggregate_area_price(
     rows: pd.DataFrame,
+    *,
+    price_column: str = "price_per_sqm",
 ) -> tuple[float, str | None]:
     """One postal code in one quarter: weighted or simple mean price."""
-    prices = rows["price_per_sqm"].astype(float)
+    prices = rows[price_column].astype(float)
     if prices.notna().sum() == 0:
         return float("nan"), None
 
@@ -55,7 +57,7 @@ def _aggregate_area_price(
     if not weighted_rows.empty:
         weights = weighted_rows["transactions"].astype(float)
         value = float(
-            np.average(weighted_rows["price_per_sqm"].astype(float), weights=weights)
+            np.average(weighted_rows[price_column].astype(float), weights=weights)
         )
         return value, "weighted_mean"
 
@@ -80,14 +82,23 @@ def _weighted_or_simple_mean(
 
 def pct_change(df: pd.DataFrame, quarters: int) -> pd.Series:
     """Percentage change in ``price_per_sqm`` versus ``quarters`` calendar quarters earlier."""
+    return _pct_change_column(df, quarters, "price_per_sqm")
+
+
+def real_pct_change(df: pd.DataFrame, quarters: int) -> pd.Series:
+    """Percentage change in ``real_price_per_sqm`` versus ``quarters`` quarters earlier."""
+    return _pct_change_column(df, quarters, "real_price_per_sqm")
+
+
+def _pct_change_column(df: pd.DataFrame, quarters: int, column: str) -> pd.Series:
     if quarters < 1:
         raise ValueError("quarters must be at least 1")
 
-    lookup = df.set_index(list(_KEY_COLS))["price_per_sqm"]
+    lookup = df.set_index(list(_KEY_COLS))[column]
     result = pd.Series(index=df.index, dtype=float)
 
     for idx, row in df.iterrows():
-        current = row["price_per_sqm"]
+        current = row[column]
         prior_quarter = _shift_quarter(row["quarter"], quarters)
         key = (row["postal_code"], row["building_type"], prior_quarter)
         try:
@@ -100,6 +111,40 @@ def pct_change(df: pd.DataFrame, quarters: int) -> pd.Series:
             result.loc[idx] = (float(current) / float(prior) - 1.0) * 100.0
 
     return result
+
+
+def to_real(
+    df: pd.DataFrame,
+    cpi_quarterly: pd.Series,
+    base_quarter: str | None = None,
+) -> pd.DataFrame:
+    """Return a copy of ``df`` with ``real_price_per_sqm`` in ``base_quarter`` euros.
+
+    Missing nominal prices or missing CPI for a quarter stay missing.
+    """
+    from housing_analyzer.data.cpi import latest_complete_quarter
+
+    out = df.copy()
+    if cpi_quarterly.empty:
+        out["real_price_per_sqm"] = float("nan")
+        return out
+
+    base = base_quarter or latest_complete_quarter(cpi_quarterly)
+    if base is None or base not in cpi_quarterly.index:
+        out["real_price_per_sqm"] = float("nan")
+        return out
+
+    base_cpi = float(cpi_quarterly.loc[base])
+    if pd.isna(base_cpi) or base_cpi == 0.0:
+        out["real_price_per_sqm"] = float("nan")
+        return out
+
+    quarter_cpi = out["quarter"].map(cpi_quarterly)
+    factor = base_cpi / quarter_cpi.astype(float)
+    nominal = out["price_per_sqm"].astype(float)
+    out["real_price_per_sqm"] = nominal * factor
+    out.loc[nominal.isna() | quarter_cpi.isna(), "real_price_per_sqm"] = float("nan")
+    return out
 
 
 def reliability(
@@ -165,6 +210,8 @@ def area_prices_at(
     df: pd.DataFrame,
     quarter: str,
     building_type: str | None = None,
+    *,
+    price_column: str = "price_per_sqm",
 ) -> pd.DataFrame:
     """Price per square metre of every postal-code area for one quarter, all at once.
 
@@ -173,7 +220,8 @@ def area_prices_at(
     building types (simple mean when no weights exist). Returns a frame indexed by
     ``postal_code`` with ``area_name``, ``price_per_sqm`` and ``price_method``.
     """
-    columns = ["area_name", "price_per_sqm", "price_method"]
+    value_col = price_column
+    columns = ["area_name", value_col, "price_method"]
     subset = _quarter_slice(df, quarter, building_type)
     if subset.empty:
         return pd.DataFrame(columns=columns, index=pd.Index([], name="postal_code"))
@@ -181,13 +229,13 @@ def area_prices_at(
     first = subset.drop_duplicates("postal_code", keep="first").set_index("postal_code")
 
     if building_type is not None:
-        price = first["price_per_sqm"].astype(float)
+        price = first[price_column].astype(float)
         method = pd.Series(
             np.where(price.isna(), None, "observed"), index=price.index, dtype=object
         )
     else:
         postal = subset["postal_code"]
-        prices = subset["price_per_sqm"].astype(float)
+        prices = subset[price_column].astype(float)
         tx = subset["transactions"].astype(float)
         weight = tx.where(tx > 0)
         usable = weight.notna() & prices.notna()
@@ -213,6 +261,8 @@ def area_prices_at(
             "price_method": method,
         }
     )
+    if price_column != "price_per_sqm":
+        out = out.rename(columns={"price_per_sqm": price_column})
     return out.sort_index()
 
 
@@ -327,11 +377,13 @@ def summarize_areas(
     *,
     min_transactions: int = 10,
     window: int = 4,
+    df_real: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """:func:`summarize_area` for every postal-code area at once (one pass over the data).
 
     Returns a frame indexed by ``postal_code`` with ``price_per_sqm``,
-    ``pct_change_1y``, ``pct_change_5y``, ``reliability``, ``rank``, ``percentile``
+    ``pct_change_1y``, ``pct_change_5y``, optional real change columns when
+    ``df_real`` is given, ``reliability``, ``rank``, ``percentile``
     and ``price_method``. Areas with no row at the quarter are absent.
     """
     columns = [
@@ -343,6 +395,15 @@ def summarize_areas(
         "percentile",
         "price_method",
     ]
+    if df_real is not None:
+        columns = [
+            "price_per_sqm",
+            "pct_change_1y",
+            "pct_change_5y",
+            "pct_change_1y_real",
+            "pct_change_5y_real",
+            *columns[3:],
+        ]
     current = area_prices_at(df, quarter, building_type)
     if current.empty:
         return pd.DataFrame(columns=columns, index=pd.Index([], name="postal_code"))
@@ -356,6 +417,18 @@ def summarize_areas(
             "price_per_sqm"
         ].reindex(current.index)
         out[name] = (now / prior - 1.0) * 100.0
+    if df_real is not None:
+        now_real = area_prices_at(
+            df_real, quarter, building_type, price_column="real_price_per_sqm"
+        )["real_price_per_sqm"].reindex(current.index)
+        for name, lag in (("pct_change_1y_real", 4), ("pct_change_5y_real", 20)):
+            prior_real = area_prices_at(
+                df_real,
+                _shift_quarter(quarter, lag),
+                building_type,
+                price_column="real_price_per_sqm",
+            )["real_price_per_sqm"].reindex(current.index)
+            out[name] = (now_real / prior_real - 1.0) * 100.0
     out["reliability"] = reliability_at(
         df,
         quarter,
@@ -375,15 +448,16 @@ def regional_average(
     quarter: str,
     *,
     building_type: str | None = None,
+    price_column: str = "price_per_sqm",
 ) -> pd.DataFrame:
-    """Transaction-weighted (or simple) mean ``price_per_sqm`` per named group of areas."""
+    """Transaction-weighted (or simple) mean price per named group of areas."""
     subset = df.loc[df["quarter"] == quarter].copy()
     if building_type is not None:
         subset = subset.loc[subset["building_type"] == building_type]
 
     subset = subset.loc[subset["postal_code"].isin(group)]
     if subset.empty:
-        return pd.DataFrame(columns=["group", "price_per_sqm", "average_method"])
+        return pd.DataFrame(columns=["group", price_column, "average_method"])
 
     subset = subset.assign(group=subset["postal_code"].map(group))
     subset = subset.dropna(subset=["group"])
@@ -391,12 +465,12 @@ def regional_average(
     rows: list[dict[str, Any]] = []
     for group_name, chunk in subset.groupby("group", sort=True):
         value, method = _weighted_or_simple_mean(
-            chunk["price_per_sqm"], chunk["transactions"]
+            chunk[price_column], chunk["transactions"]
         )
         rows.append(
             {
                 "group": group_name,
-                "price_per_sqm": value,
+                price_column: value,
                 "average_method": method,
             }
         )

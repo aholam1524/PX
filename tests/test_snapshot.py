@@ -36,6 +36,7 @@ def snapshot_dir(tmp_path, monkeypatch):
         data_paths, "BOUNDARIES_SNAPSHOT_FILE", snap / "boundaries.geojson.gz"
     )
     monkeypatch.setattr(data_paths, "MANIFEST_FILE", snap / "manifest.json")
+    monkeypatch.setattr(data_paths, "CPI_SNAPSHOT_FILE", snap / "cpi.csv.gz")
     return snap
 
 
@@ -57,12 +58,15 @@ def test_build_manifest_fields():
         prices_bytes=1000,
         boundaries_features=3,
         boundaries_bytes=2000,
+        cpi_rows=5,
+        cpi_bytes=100,
     )
     assert manifest["fetch_date"]
-    assert manifest["total_bytes"] == 3000
+    assert manifest["total_bytes"] == 3100
     assert manifest["files"]["prices.csv.gz"]["rows"] == 10
     assert manifest["files"]["boundaries.geojson.gz"]["features"] == 3
     assert "boundary_edition" in manifest["files"]["boundaries.geojson.gz"]
+    assert manifest["files"]["cpi.csv.gz"]["rows"] == 5
 
 
 def test_check_snapshot_size_rejects_over_limit():
@@ -76,11 +80,24 @@ def test_check_snapshot_size_rejects_over_limit():
         check_snapshot_size(manifest)
 
 
-def test_write_snapshot_and_load_manifest(snapshot_dir, sample_prices_frame, sample_boundaries):
-    manifest = write_snapshot(sample_prices_frame, sample_boundaries)
+@pytest.fixture
+def sample_cpi_frame() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "month": pd.to_datetime(["2024-01-01", "2024-02-01", "2024-03-01"]),
+            "cpi": [100.0, 101.0, 102.0],
+        }
+    )
+
+
+def test_write_snapshot_and_load_manifest(
+    snapshot_dir, sample_prices_frame, sample_boundaries, sample_cpi_frame
+):
+    manifest = write_snapshot(sample_prices_frame, sample_boundaries, sample_cpi_frame)
     assert data_paths.MANIFEST_FILE.is_file()
     assert data_paths.PRICES_SNAPSHOT_FILE.is_file()
     assert data_paths.BOUNDARIES_SNAPSHOT_FILE.is_file()
+    assert data_paths.CPI_SNAPSHOT_FILE.is_file()
     loaded = load_manifest()
     assert loaded is not None
     assert loaded["total_bytes"] == manifest["total_bytes"]
@@ -88,9 +105,13 @@ def test_write_snapshot_and_load_manifest(snapshot_dir, sample_prices_frame, sam
 
 
 def test_load_prices_reads_snapshot(
-    snapshot_dir, sample_prices_frame, sample_boundaries, monkeypatch
+    snapshot_dir,
+    sample_prices_frame,
+    sample_boundaries,
+    sample_cpi_frame,
+    monkeypatch,
 ):
-    write_snapshot(sample_prices_frame, sample_boundaries)
+    write_snapshot(sample_prices_frame, sample_boundaries, sample_cpi_frame)
     cache_file = snapshot_dir.parent / "housing_prices.pkl"
     monkeypatch.setattr(prices_mod, "CACHE_FILE", cache_file)
     sample_prices_frame.to_pickle(cache_file)
@@ -105,9 +126,13 @@ def test_load_prices_reads_snapshot(
 
 
 def test_load_prices_refresh_bypasses_snapshot(
-    snapshot_dir, sample_prices_frame, sample_boundaries, monkeypatch
+    snapshot_dir,
+    sample_prices_frame,
+    sample_boundaries,
+    sample_cpi_frame,
+    monkeypatch,
 ):
-    write_snapshot(sample_prices_frame, sample_boundaries)
+    write_snapshot(sample_prices_frame, sample_boundaries, sample_cpi_frame)
 
     fetched = sample_prices_frame.head(1).copy()
 
@@ -125,8 +150,10 @@ def test_load_prices_refresh_bypasses_snapshot(
     assert cache_file.is_file()
 
 
-def test_load_boundaries_reads_snapshot(snapshot_dir, sample_prices_frame, sample_boundaries):
-    write_snapshot(sample_prices_frame, sample_boundaries)
+def test_load_boundaries_reads_snapshot(
+    snapshot_dir, sample_prices_frame, sample_boundaries, sample_cpi_frame
+):
+    write_snapshot(sample_prices_frame, sample_boundaries, sample_cpi_frame)
 
     def fail_fetch(_url: str) -> dict:
         raise AssertionError("WFS should not run when snapshot exists")
@@ -137,9 +164,13 @@ def test_load_boundaries_reads_snapshot(snapshot_dir, sample_prices_frame, sampl
 
 
 def test_load_boundaries_refresh_bypasses_snapshot(
-    snapshot_dir, sample_prices_frame, sample_boundaries, monkeypatch
+    snapshot_dir,
+    sample_prices_frame,
+    sample_boundaries,
+    sample_cpi_frame,
+    monkeypatch,
 ):
-    write_snapshot(sample_prices_frame, sample_boundaries)
+    write_snapshot(sample_prices_frame, sample_boundaries, sample_cpi_frame)
 
     with BOUNDARIES_SAMPLE.open(encoding="utf-8") as handle:
         fetched = json.load(handle)

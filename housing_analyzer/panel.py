@@ -14,7 +14,9 @@ from housing_analyzer.analysis.metrics import (
     area_prices_at,
     quarter_index,
     regional_average,
+    to_real,
 )
+from housing_analyzer.data.cpi import cpi_by_quarter, load_cpi
 from housing_analyzer.map import (
     BUILDING_TYPE_CHOICES,
     resolve_building_type_label,
@@ -41,6 +43,7 @@ class TrendChartData:
     municipality_label: str | None
     municipality_available: bool
     indexed: bool
+    use_real: bool
 
 
 def boundary_properties(
@@ -141,15 +144,17 @@ def quarterly_area_prices(
     df: pd.DataFrame,
     postal_code: str,
     building_type: str | None = None,
+    *,
+    price_column: str = "price_per_sqm",
 ) -> pd.Series:
     """Price per m² by quarter for one postal code (NaN where missing)."""
     code = str(postal_code).zfill(5)
     quarters = _sorted_quarters(df["quarter"].unique())
     values: dict[str, float] = {}
     for quarter in quarters:
-        prices = area_prices_at(df, quarter, building_type)
+        prices = area_prices_at(df, quarter, building_type, price_column=price_column)
         if code in prices.index:
-            values[quarter] = float(prices.loc[code, "price_per_sqm"])
+            values[quarter] = float(prices.loc[code, price_column])
         else:
             values[quarter] = float("nan")
     return pd.Series(values)
@@ -160,16 +165,20 @@ def quarterly_group_average(
     group: Mapping[str, str],
     group_name: str,
     building_type: str | None = None,
+    *,
+    price_column: str = "price_per_sqm",
 ) -> pd.Series:
     """One group's average price per m² for every quarter in ``df``."""
     quarters = _sorted_quarters(df["quarter"].unique())
     values: dict[str, float] = {}
     for quarter in quarters:
-        avg = regional_average(df, group, quarter, building_type=building_type)
+        avg = regional_average(
+            df, group, quarter, building_type=building_type, price_column=price_column
+        )
         if avg.empty:
             values[quarter] = float("nan")
             continue
-        match = avg.loc[avg["group"] == group_name, "price_per_sqm"]
+        match = avg.loc[avg["group"] == group_name, price_column]
         values[quarter] = float(match.iloc[0]) if len(match) else float("nan")
     return pd.Series(values)
 
@@ -253,10 +262,21 @@ def build_trend_chart_data(
     building_type: str | None,
     *,
     index_to_100: bool = False,
+    use_real: bool = False,
+    cpi_df: pd.DataFrame | None = None,
 ) -> TrendChartData:
     """Area, municipality, and national quarterly price series for the trend chart."""
     code = str(postal_code).zfill(5)
-    area = quarterly_area_prices(prices_df, code, building_type)
+    work_df = prices_df
+    price_column = "price_per_sqm"
+    if use_real:
+        cpi = cpi_df if cpi_df is not None else load_cpi()
+        work_df = to_real(prices_df, cpi_by_quarter(cpi))
+        price_column = "real_price_per_sqm"
+
+    area = quarterly_area_prices(
+        work_df, code, building_type, price_column=price_column
+    )
     quarters = _sorted_quarters(area.index)
 
     muni_map = postal_to_municipality_group(boundaries)
@@ -268,13 +288,21 @@ def build_trend_chart_data(
 
     national_map = national_group_mapping(prices_df["postal_code"].unique())
     national = quarterly_group_average(
-        prices_df, national_map, NATIONAL_GROUP, building_type
+        work_df,
+        national_map,
+        NATIONAL_GROUP,
+        building_type,
+        price_column=price_column,
     )
 
     municipality: pd.Series | None = None
     if municipality_available and muni_code is not None:
         municipality = quarterly_group_average(
-            prices_df, muni_map, muni_code, building_type
+            work_df,
+            muni_map,
+            muni_code,
+            building_type,
+            price_column=price_column,
         )
 
     if index_to_100:
@@ -293,6 +321,7 @@ def build_trend_chart_data(
         municipality_label=municipality_label,
         municipality_available=municipality_available,
         indexed=index_to_100,
+        use_real=use_real,
     )
 
 
@@ -304,7 +333,12 @@ def build_trend_figure(data: TrendChartData, *, area_label: str) -> go.Figure:
     """Plotly line chart with gaps for missing quarters."""
     fig = go.Figure()
     x = list(data.quarters)
-    y_unit = "Index (100 = start)" if data.indexed else "EUR/m²"
+    if data.indexed:
+        y_unit = "Index (100 = start)"
+    elif data.use_real:
+        y_unit = "Real EUR/m²"
+    else:
+        y_unit = "EUR/m²"
 
     fig.add_trace(
         go.Scatter(
