@@ -1,0 +1,68 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "posti_alue": "00100",
+        "postal_code": "00100",
+        "nimi": "Helsinki keskusta",
+        "vuosi": 2022
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [24.94, 60.16],
+            [24.95, 60.16],
+            [24.95, 60.17],
+            [24.94, 60.17],
+            [24.94, 60.16]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "posti_alue": "01200",
+        "postal_code": "01200",
+        "nimi": "Vantaa Hakunila",
+        "vuosi": 2022
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [25.01, 60.29],
+            [25.02, 60.29],
+            [25.02, 60.3],
+            [25.01, 60.3],
+            [25.01, 60.29]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "posti_alue": "99999",
+        "postal_code": "99999",
+        "nimi": "Fixture-only area",
+        "vuosi": 2022
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [22.0, 63.0],
+            [22.01, 63.0],
+            [22.01, 63.01],
+            [22.0, 63.01],
+            [22.0, 63.0]
+          ]
+        ]
+      }
+    }
+  ]
+}
