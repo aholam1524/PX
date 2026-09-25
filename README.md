@@ -23,7 +23,13 @@ Quarterly housing-company prices and transaction counts by postal-code area come
 
 Postal-code area boundaries for the map come from Statistics Finland’s WFS service [`geo.stat.fi/geoserver/postialue/wfs`](https://geo.stat.fi/geoserver/postialue/wfs) (feature type `postialue:pno_2022`, matching the 2022-01-01 postal-code list used in the price table). The loader lives in `housing_analyzer/data/boundaries.py` (`load_boundaries()` / `join_prices_to_areas()`).
 
-Parsed downloads are cached under `data/raw/` (git-ignored).
+Parsed downloads are cached under `data/raw/` (git-ignored). The app prefers a committed snapshot under `data/snapshot/` (`prices.csv.gz`, `boundaries.geojson.gz`, `manifest.json`) so cold starts do not hit the live APIs.
+
+### Refreshing the data
+
+After this workflow is on **`main`**, open [Refresh housing data](https://github.com/aholam1524/PX/actions/workflows/refresh-data.yml) in GitHub Actions and click **Run workflow**. It fetches the latest prices and boundaries, rebuilds `data/snapshot/`, and opens a pull request into `dev` when anything changed (merge that PR to update the snapshot).
+
+Quarterly is enough for housing statistics; you only need a refresh when Statistics Finland publishes new quarters or boundary editions. Each refresh adds a few megabytes to git history, so avoid running it more often than necessary.
 
 ### Analysis
 

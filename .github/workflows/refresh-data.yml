@@ -1,0 +1,81 @@
+name: Refresh housing data
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout dev
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+          token: ${{ secrets.FACTORY_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Build data snapshot
+        run: python -m housing_analyzer.data.snapshot
+
+      - name: Summarize manifest for PR body
+        id: manifest
+        run: |
+          python <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("data/snapshot/manifest.json")
+          if not path.is_file():
+              raise SystemExit("manifest.json missing after snapshot build")
+          manifest = json.loads(path.read_text(encoding="utf-8"))
+          lines = [
+              "## Housing data refresh",
+              "",
+              f"**Fetch date:** {manifest.get('fetch_date', 'unknown')}",
+              "",
+              "| File | Size (bytes) | Details |",
+              "| --- | ---: | --- |",
+          ]
+          for name, entry in (manifest.get("files") or {}).items():
+              if not isinstance(entry, dict):
+                  continue
+              details = []
+              if "rows" in entry:
+                  details.append(f"rows={entry['rows']}")
+              if "features" in entry:
+                  details.append(f"features={entry['features']}")
+              if entry.get("boundary_edition"):
+                  details.append(str(entry["boundary_edition"]))
+              lines.append(
+                  f"| `{name}` | {entry.get('bytes', 0)} | {', '.join(details)} |"
+              )
+          lines.append("")
+          lines.append(f"**Total size:** {manifest.get('total_bytes', 0)} bytes")
+          body = "\n".join(lines)
+          Path("refresh-pr-body.md").write_text(body, encoding="utf-8")
+          PY
+
+      - name: Set refresh branch name
+        id: branch
+        run: echo "name=data/refresh-$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Open pull request when snapshot changed
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.FACTORY_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
+          commit-message: "chore(data): refresh housing snapshot"
+          branch: ${{ steps.branch.outputs.name }}
+          base: dev
+          delete-branch: true
+          title: "Refresh housing data snapshot"
+          body-path: refresh-pr-body.md
