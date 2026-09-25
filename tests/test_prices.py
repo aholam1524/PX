@@ -169,8 +169,12 @@ def test_metadata_variables_raises_when_variables_missing():
 
 def test_load_prices_uses_cache(tmp_path, monkeypatch):
     cache_file = tmp_path / "housing_prices.pkl"
+    from housing_analyzer.data import paths as data_paths
+
+    missing_snapshot = tmp_path / "no_snapshot.csv.gz"
     monkeypatch.setattr(prices_mod, "CACHE_DIR", tmp_path)
     monkeypatch.setattr(prices_mod, "CACHE_FILE", cache_file)
+    monkeypatch.setattr(data_paths, "PRICES_SNAPSHOT_FILE", missing_snapshot)
 
     sample = pd.DataFrame(
         {

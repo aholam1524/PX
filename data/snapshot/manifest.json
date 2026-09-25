@@ -1,0 +1,18 @@
+{
+  "fetch_date": "2026-09-25",
+  "files": {
+    "prices.csv.gz": {
+      "bytes": 3286962,
+      "rows": 475824,
+      "source_url": "https://pxdata.stat.fi/PxWeb/api/v1/en/StatFin/ashi/13mt.px"
+    },
+    "boundaries.geojson.gz": {
+      "bytes": 1176758,
+      "features": 3027,
+      "source_url": "https://geo.stat.fi/geoserver/postialue/wfs?service=WFS&version=2.0.0&request=GetFeature&typeName=postialue:pno_2022&outputFormat=application%2Fjson&srsName=EPSG%3A4326",
+      "boundary_edition": "pno_2022 (2022 Paavo postal-code areas)",
+      "feature_type": "postialue:pno_2022"
+    }
+  },
+  "total_bytes": 4463720
+}
