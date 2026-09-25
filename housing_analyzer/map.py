@@ -39,6 +39,9 @@ NORMAL_OUTLINE_COLOR = "#9ca3af"
 NORMAL_OUTLINE_WIDTH = 0.4
 MAP_TOP_MARGIN = 40
 MAP_LAYOUT_MARGINS = {"l": 0, "r": 0, "t": MAP_TOP_MARGIN, "b": 0}
+FINLAND_CENTER = {"lat": 64.5, "lon": 26.0}
+FINLAND_ZOOM = 4.0
+MAP_UIREVISION = "housing-map-finland"
 PROVISIONAL_COVERAGE_RATIO = 0.85
 PRIOR_QUARTERS_FOR_COVERAGE = 8
 DEFAULT_COLOR_PERCENTILE_LOW = 2.0
@@ -595,6 +598,17 @@ def _solid_colorscale(color: str) -> list[list[Any]]:
     return [[0.0, color], [1.0, color]]
 
 
+def base_map_layout_kwargs() -> dict[str, Any]:
+    """Default MapLibre view (Finland) and ``uirevision`` for stable zoom/pan across reruns."""
+    return {
+        "map_style": "carto-positron",
+        "map_center": dict(FINLAND_CENTER),
+        "map_zoom": FINLAND_ZOOM,
+        "uirevision": MAP_UIREVISION,
+        "margin": MAP_LAYOUT_MARGINS,
+    }
+
+
 def plotly_map_chart_config() -> dict[str, Any]:
     """Plotly config for the housing map (toolbar trimmed, selection still works)."""
     return {
@@ -661,12 +675,7 @@ def build_budget_fit_choropleth_figure(
     """Choropleth coloured by whether typical prices fit the user's budget."""
     if map_df.empty:
         fig = go.Figure()
-        fig.update_layout(
-            map_style="carto-positron",
-            map_center={"lat": 64.5, "lon": 26.0},
-            map_zoom=4,
-            margin=MAP_LAYOUT_MARGINS,
-        )
+        fig.update_layout(**base_map_layout_kwargs())
         return fig
 
     fig = go.Figure()
@@ -718,8 +727,7 @@ def build_budget_fit_choropleth_figure(
         )
 
     fig.update_layout(
-        map_style="carto-positron",
-        margin=MAP_LAYOUT_MARGINS,
+        **base_map_layout_kwargs(),
         legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "x": 0},
     )
     return fig
@@ -738,12 +746,7 @@ def build_choropleth_figure(
 
     if map_df.empty:
         fig = go.Figure()
-        fig.update_layout(
-            map_style="carto-positron",
-            map_center={"lat": 64.5, "lon": 26.0},
-            map_zoom=4,
-            margin=MAP_LAYOUT_MARGINS,
-        )
+        fig.update_layout(**base_map_layout_kwargs())
         return fig
 
     metric_title = dict(METRIC_CHOICES).get(metric, metric)
@@ -804,8 +807,7 @@ def build_choropleth_figure(
         )
 
     fig.update_layout(
-        map_style="carto-positron",
-        margin=MAP_LAYOUT_MARGINS,
+        **base_map_layout_kwargs(),
         legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "x": 0},
     )
     return fig

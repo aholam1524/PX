@@ -38,6 +38,7 @@ from housing_analyzer.map import (
     prepare_budget_fit_dataframe,
     prepare_map_dataframe,
 )
+from tests.conftest import assert_finland_map_layout
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
@@ -196,6 +197,7 @@ def test_hybrid_figure_trace_order_and_geometry(
         sample_municipality_boundaries,
         METRIC_PRICE,
     )
+    assert_finland_map_layout(fig)
     assert fig.data[0].name == MUNICIPALITY_TRACE_NAME
     trace_names = [t.name for t in fig.data]
     assert POSTAL_TRACE_NAME in trace_names
@@ -271,6 +273,7 @@ def test_hybrid_budget_figure_layers_municipality_and_postal(
         sample_municipality_boundaries,
         METRIC_FITS_BUDGET,
     )
+    assert_finland_map_layout(fig)
     trace_names = [t.name for t in fig.data]
 
     # 00100 has its own price, so a postal-level budget-fit trace is drawn.
