@@ -17,7 +17,11 @@ streamlit run app/streamlit_app.py
 - **`app/streamlit_app.py`** — Streamlit UI
 - **`tests/`** — pytest (fixtures under `tests/fixtures/` when added)
 
-Housing data will come from public sources (e.g. [Statistics Finland](https://www.stat.fi/)). Nothing in this repository is investment advice.
+### Data
+
+Quarterly housing-company prices and transaction counts by postal-code area come from Statistics Finland’s table [“Prices per square meter of old dwellings in housing companies and numbers of transactions by postal code area, quarterly”](https://pxdata.stat.fi/PxWeb/api/v1/en/StatFin/ashi/13mt.px) (PxWeb API). The loader lives in `housing_analyzer/data/prices.py` (`load_prices()` / `fetch_prices()`). Parsed downloads are cached under `data/raw/` (git-ignored).
+
+Nothing in this repository is investment advice.
 
 Describe the work in Cursor chat in this repo. The agent files a GitHub issue; that **queues** the work (label `factory-queued`). You run **Start factory** in Actions to begin Dev on the oldest queued issue. Code moves `feature/N-slug` → `dev` → `test` → `main`. After review, the feature PR merges into `dev` automatically when Factory CI is green; you merge into `main`. Merge into `test` is automatic when the Test agent reports PASS and CI is green.
 

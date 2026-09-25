@@ -1,0 +1,217 @@
+{
+  "version": "2.0",
+  "class": "dataset",
+  "label": "Prices per square meter of old dwellings in housing companies and numbers of transactions by postal code area, quarterly by Quarter, Postal code, Building type and Information",
+  "source": "Statistics Finland, prices of dwellings in housing companies",
+  "updated": "2026-05-19T05:00:00Z",
+  "note": [
+    "<A HREF='https://stat.fi/en/statistics/documentation/ashi' TARGET=_blank>Documentation of statistics</A>",
+    "... confidential\r\n... confidential\r\n... confidential"
+  ],
+  "role": {
+    "time": [
+      "timeperiod_q"
+    ],
+    "geo": [
+      "postinumeroalue_4_20220101"
+    ],
+    "metric": [
+      "contentscode"
+    ]
+  },
+  "id": [
+    "timeperiod_q",
+    "postinumeroalue_4_20220101",
+    "talotyyppi_6_20131021",
+    "contentscode"
+  ],
+  "size": [
+    2,
+    3,
+    2,
+    2
+  ],
+  "dimension": {
+    "timeperiod_q": {
+      "label": "Quarter",
+      "note": [
+        "* preliminary data"
+      ],
+      "category": {
+        "index": {
+          "2024Q3": 0,
+          "2024Q4": 1
+        },
+        "label": {
+          "2024Q3": "2024Q3",
+          "2024Q4": "2024Q4"
+        }
+      },
+      "extension": {
+        "elimination": false,
+        "show": "value"
+      },
+      "link": {
+        "describedby": [
+          {
+            "extension": {
+              "timeperiod_q": "SCALE-TYPE=None"
+            }
+          }
+        ]
+      }
+    },
+    "postinumeroalue_4_20220101": {
+      "label": "Postal code",
+      "category": {
+        "index": {
+          "00100": 0,
+          "00120": 1,
+          "01200": 2
+        },
+        "label": {
+          "00100": "00100  Helsinki keskusta - Etu-Töölö (Helsinki)",
+          "00120": "00120  Punavuori - Bulevardi (Helsinki)",
+          "01200": "01200  Hakunila (Vantaa)"
+        }
+      },
+      "extension": {
+        "elimination": false,
+        "show": "value"
+      },
+      "link": {
+        "describedby": [
+          {
+            "extension": {
+              "postinumeroalue_4_20220101": "SCALE-TYPE=nominal"
+            }
+          }
+        ]
+      }
+    },
+    "talotyyppi_6_20131021": {
+      "label": "Building type",
+      "note": [
+        "Building type, number of rooms"
+      ],
+      "category": {
+        "index": {
+          "1": 0,
+          "2": 1
+        },
+        "label": {
+          "1": "Blocks of flats, one-room flat",
+          "2": "Blocks of flats, two-room flat"
+        }
+      },
+      "extension": {
+        "elimination": false,
+        "show": "value"
+      },
+      "link": {
+        "describedby": [
+          {
+            "extension": {
+              "talotyyppi_6_20131021": "SCALE-TYPE=nominal"
+            }
+          }
+        ]
+      }
+    },
+    "contentscode": {
+      "label": "Information",
+      "category": {
+        "index": {
+          "keskihinta_aritm_nw": 0,
+          "lkm_julk20": 1
+        },
+        "label": {
+          "keskihinta_aritm_nw": "Price per square meter (EUR/m2)",
+          "lkm_julk20": "Number of sales, asset transfer tax data starting from 2020"
+        },
+        "note": {
+          "keskihinta_aritm_nw": [
+            "Prices per square metre are arithmetic averages of square prices (EUR/m2) calculated directly from the data. Prices per square metre describe regional differences in price levels and they should not be used to calculate price change."
+          ],
+          "lkm_julk20": [
+            "The data on numbers describe asset transfer tax statements received from the Tax Administration by the time of release in the area. The data on numbers of old dwellings in housing companies will become revised in the following releases. Final data for the year are published when all the transfer tax statements  are received from the Tax Administration, normally in May. The latest months number of transactions should not be used when describing the activeness of trading. Instead the number of transactions describe the quality of published price data.",
+            "The number of transactions include transactions of price controlled HITAS dwellings and Housing Finance and Development Centre ARA dwellings in the area that not included in the price indices and prices per square metre.\r\nDue to changes in the data, the numbers of sales are not strictly comparable starting from the last quarter of 2019.\r\nThe number of dwelling transactions includes price controlled HITAS and government-subsidised dwellings, as well as observations that are removed due to an area or price deviation from the calculation of the price per square metre or index. HITAS and government-subsidised dwellings and the above-mentioned outlier observations are excluded from the calculation of prices per square metre and indices."
+          ]
+        },
+        "unit": {
+          "keskihinta_aritm_nw": {
+            "base": "EUR/square metre",
+            "decimals": 0
+          },
+          "lkm_julk20": {
+            "base": "number",
+            "decimals": 0
+          }
+        }
+      },
+      "extension": {
+        "elimination": false,
+        "show": "value"
+      }
+    }
+  },
+  "extension": {
+    "px": {
+      "tableid": "13mt",
+      "decimals": 0,
+      "official-statistics": true,
+      "aggregallowed": true,
+      "language": "fi",
+      "contents": "Prices per square meter of old dwellings in housing companies and numbers of transactions by postal code area, quarterly",
+      "description": "13mt -- Prices per square meter of old dwellings in housing companies and numbers of transactions by postal code area, quarterly, 2009Q1-2026Q1*",
+      "descriptiondefault": false,
+      "heading": [
+        "contentscode"
+      ],
+      "stub": [
+        "timeperiod_q",
+        "postinumeroalue_4_20220101",
+        "talotyyppi_6_20131021"
+      ],
+      "matrix": "13mt",
+      "subject-code": "ashi",
+      "subject-area": "Prices of dwellings in housing companies"
+    },
+    "contact": [
+      {
+        "raw": "<A HREF='https://stat.fi/en/statistics/ashi' TARGET=_blank>Statistics' homepage</A>"
+      }
+    ]
+  },
+  "value": [
+    7952,
+    24,
+    7151,
+    29,
+    null,
+    "..",
+    8084,
+    16,
+    null,
+    4,
+    1446,
+    8,
+    7590,
+    26,
+    7638,
+    31,
+    8655,
+    12,
+    8193,
+    16,
+    null,
+    5,
+    2116,
+    9
+  ],
+  "status": {
+    "4": "...",
+    "8": "...",
+    "20": "..."
+  }
+}
