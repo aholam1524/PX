@@ -30,14 +30,26 @@ from housing_analyzer.data.demographics import attach_demographics_to_summaries
 from housing_analyzer.data.cpi import cpi_by_quarter
 from housing_analyzer.data.paths import use_fixtures
 from housing_analyzer.data.snapshot import snapshot_is_complete
+from housing_analyzer.affordability import (
+    AFFORDABILITY_DISCLAIMER,
+    down_payment_from_inputs,
+    loan_amount,
+    max_price,
+    monthly_payment,
+    total_interest,
+    typical_dwelling_price,
+)
 from housing_analyzer.map import (
+    BUDGET_FIT_LABELS,
     BUILDING_TYPE_CHOICES,
     METRIC_CHOICES,
+    METRIC_FITS_BUDGET,
     METRIC_PRICE,
     build_choropleth_figure,
     latest_quarter_with_data,
     list_quarters,
     postal_code_from_selection,
+    prepare_budget_fit_dataframe,
     prepare_map_dataframe,
     resolve_building_type_label,
     search_area_matches,
@@ -96,10 +108,29 @@ def _load_housing_data() -> tuple:
 
 @st.cache_data(show_spinner=False)
 def _cached_map_frame(
-    _prices, _boundaries, _cpi, _demographics, quarter, building_type_code, metric
+    _prices,
+    _boundaries,
+    _cpi,
+    _demographics,
+    quarter,
+    building_type_code,
+    metric,
+    size_sqm,
+    max_affordable_price,
 ):
     """Map table for one selection. The large inputs are not hashed (leading underscore);
     the selection values are the cache key, so clicking the map does not recompute it."""
+    if metric == METRIC_FITS_BUDGET:
+        return prepare_budget_fit_dataframe(
+            _prices,
+            _boundaries,
+            quarter,
+            building_type_code,
+            size_sqm,
+            max_affordable_price,
+            cpi_df=_cpi,
+            demographics_df=_demographics,
+        )
     return prepare_map_dataframe(
         _prices,
         _boundaries,
@@ -177,6 +208,173 @@ def _format_compare_option(catalog: pd.DataFrame, code: str) -> str:
     row = catalog.loc[catalog["postal_code"] == code]
     name = str(row["area_name"].iloc[0]) if not row.empty else ""
     return f"{code} — {name}".strip(" —")
+
+
+def _affordability_sidebar_inputs() -> dict[str, float | bool | str]:
+    st.header("Affordability")
+    size_sqm = st.number_input(
+        "Apartment size (m²)",
+        min_value=1.0,
+        value=60.0,
+        step=1.0,
+        key="afford_size_sqm",
+    )
+    monthly_budget = st.number_input(
+        "Monthly budget (EUR)",
+        min_value=0.0,
+        value=1200.0,
+        step=50.0,
+        key="afford_monthly_budget",
+    )
+    annual_rate_pct = st.number_input(
+        "Interest rate (% per year)",
+        min_value=0.0,
+        value=4.0,
+        step=0.1,
+        key="afford_rate",
+    )
+    loan_years = st.number_input(
+        "Loan term (years)",
+        min_value=1.0,
+        value=25.0,
+        step=1.0,
+        key="afford_years",
+    )
+    down_mode = st.radio(
+        "Down payment as",
+        options=("euros", "percent"),
+        format_func=lambda v: "Euros" if v == "euros" else "Percent of price",
+        horizontal=True,
+        key="afford_down_mode",
+    )
+    down_payment_value = st.number_input(
+        "Down payment",
+        min_value=0.0,
+        value=20.0 if down_mode == "percent" else 30_000.0,
+        step=500.0 if down_mode == "euros" else 1.0,
+        key="afford_down_value",
+    )
+    price_source = st.radio(
+        "Price for calculator",
+        options=("target", "area"),
+        format_func=lambda v: "Target price" if v == "target" else "Use area prices",
+        key="afford_price_source",
+    )
+    target_price = st.number_input(
+        "Target price (EUR)",
+        min_value=0.0,
+        value=250_000.0,
+        step=5_000.0,
+        disabled=price_source != "target",
+        key="afford_target_price",
+    )
+    return {
+        "size_sqm": float(size_sqm),
+        "monthly_budget": float(monthly_budget),
+        "annual_rate_pct": float(annual_rate_pct),
+        "loan_years": float(loan_years),
+        "down_mode": down_mode,
+        "down_payment_value": float(down_payment_value),
+        "price_source": price_source,
+        "target_price": float(target_price),
+    }
+
+
+def _compute_max_affordable(afford: dict[str, float | bool | str]) -> float:
+    loan_cap = max_price(
+        float(afford["monthly_budget"]),
+        0.0,
+        float(afford["annual_rate_pct"]),
+        float(afford["loan_years"]),
+    )
+    if afford["down_mode"] == "percent":
+        pct = float(afford["down_payment_value"]) / 100.0
+        if pct >= 1.0:
+            return 0.0
+        return loan_cap / (1.0 - pct)
+    return max_price(
+        float(afford["monthly_budget"]),
+        float(afford["down_payment_value"]),
+        float(afford["annual_rate_pct"]),
+        float(afford["loan_years"]),
+    )
+
+
+def _render_affordability_tab(
+    prices: pd.DataFrame,
+    quarter: str,
+    building_type_code: str | None,
+    afford: dict[str, float | bool | str],
+    selected_postal_code: str | None,
+) -> None:
+    st.subheader("Affordability calculator")
+    st.caption(
+        f"Quarter **{quarter}** · {_format_building_type_display(prices, building_type_code)}"
+    )
+    st.info(AFFORDABILITY_DISCLAIMER)
+
+    max_affordable = _compute_max_affordable(afford)
+    st.metric("Maximum affordable price", f"{max_affordable:,.0f} EUR")
+    if (
+        afford["down_mode"] == "percent"
+        and float(afford["down_payment_value"]) >= 100.0
+    ):
+        st.caption(
+            "A 100%+ down payment covers any price from savings alone, so this isn't "
+            "limited by your monthly budget."
+        )
+
+    use_percent = afford["down_mode"] == "percent"
+    if afford["price_source"] == "target":
+        calc_price = float(afford["target_price"])
+    else:
+        if not selected_postal_code:
+            st.warning(
+                "Select an area on the **Map** tab (or search there) to use its typical "
+                f"price for {afford['size_sqm']:g} m²."
+            )
+            return
+        code = str(selected_postal_code).zfill(5)
+        bt_label = resolve_building_type_label(prices, building_type_code)
+        summary = summarize_area(prices, code, quarter, building_type=bt_label)
+        price_sqm = summary.get("price_per_sqm")
+        if price_sqm != price_sqm or pd.isna(price_sqm):
+            st.warning(f"No published price for {code} in this selection.")
+            return
+        calc_price = typical_dwelling_price(float(price_sqm), float(afford["size_sqm"]))
+        st.caption(
+            f"Using typical price for **{code}** ({calc_price:,.0f} EUR for "
+            f"{afford['size_sqm']:g} m² at {price_sqm:,.0f} EUR/m²)."
+        )
+
+    try:
+        down = down_payment_from_inputs(
+            calc_price,
+            float(afford["down_payment_value"]),
+            use_percent=use_percent,
+        )
+        principal = loan_amount(calc_price, down)
+        payment = monthly_payment(
+            principal,
+            float(afford["annual_rate_pct"]),
+            float(afford["loan_years"]),
+        )
+        interest = total_interest(
+            principal,
+            float(afford["annual_rate_pct"]),
+            float(afford["loan_years"]),
+        )
+    except ValueError as exc:
+        st.error(str(exc))
+        return
+
+    c1, c2 = st.columns(2)
+    c1.metric("Monthly payment", f"{payment:,.2f} EUR")
+    c2.metric("Total interest over term", f"{interest:,.0f} EUR")
+    st.caption(
+        f"For price **{calc_price:,.0f} EUR** with down payment **{down:,.0f} EUR** "
+        f"and loan **{principal:,.0f} EUR**."
+    )
 
 
 def _render_relationships_tab(
@@ -497,6 +695,7 @@ with st.sidebar:
         format_func=lambda k: dict(METRIC_CHOICES)[k],
         index=0,
     )
+    afford_inputs = _affordability_sidebar_inputs()
 
 boundary_edition = None
 if manifest:
@@ -506,11 +705,23 @@ if manifest:
 
 _init_compare_session_state()
 
-map_tab, compare_tab, relationships_tab = st.tabs(["Map", "Compare", "Relationships"])
+max_affordable_price = _compute_max_affordable(afford_inputs)
+
+map_tab, afford_tab, compare_tab, relationships_tab = st.tabs(
+    ["Map", "Affordability", "Compare", "Relationships"]
+)
 
 with map_tab:
     map_df = _cached_map_frame(
-        prices, boundaries, cpi, demographics, quarter, building_type_code, metric
+        prices,
+        boundaries,
+        cpi,
+        demographics,
+        quarter,
+        building_type_code,
+        metric,
+        afford_inputs["size_sqm"],
+        max_affordable_price,
     )
     fig = build_choropleth_figure(map_df, boundaries, metric)
 
@@ -518,14 +729,27 @@ with map_tab:
         st.caption(f"Map boundaries: {boundary_edition} (Statistics Finland).")
 
     with st.expander("How to read the map"):
-        st.markdown(
-            "- **Coloured areas** show the selected metric for the chosen quarter and building type.\n"
-            "- **Grey areas** have no published price for that selection "
-            f"({METRIC_PRICE.replace('_', ' ')} missing or suppressed); they are never shown as zero.\n"
-            "- **Lighter fill** and the hover note *Based on few sales* mark **low reliability** "
-            "(fewer than ten sales in the last four quarters).\n"
-            "- Hover a region for postal code, area name, metric value, sales, and reliability."
-        )
+        if metric == METRIC_FITS_BUDGET:
+            st.markdown(
+                "- **Green** — typical price for your size fits within the maximum affordable "
+                f"price ({max_affordable_price:,.0f} EUR from the sidebar budget).\n"
+                "- **Amber** — typical price is up to 20% above that maximum.\n"
+                "- **Red** — more than 20% above the maximum.\n"
+                "- **Grey** — no published price for the chosen quarter and building type.\n"
+                "- Typical price = area EUR/m² × apartment size (sidebar). "
+                "Uses the same loan assumptions as the Affordability tab."
+            )
+            for key, label in BUDGET_FIT_LABELS.items():
+                st.caption(f"**{label}**")
+        else:
+            st.markdown(
+                "- **Coloured areas** show the selected metric for the chosen quarter and building type.\n"
+                "- **Grey areas** have no published price for that selection "
+                f"({METRIC_PRICE.replace('_', ' ')} missing or suppressed); they are never shown as zero.\n"
+                "- **Lighter fill** and the hover note *Based on few sales* mark **low reliability** "
+                "(fewer than ten sales in the last four quarters).\n"
+                "- Hover a region for postal code, area name, metric value, sales, and reliability."
+            )
 
     if "selected_postal_code" not in st.session_state:
         st.session_state.selected_postal_code = None
@@ -577,6 +801,15 @@ with map_tab:
             st.info(
                 "Click a map area or search and choose **Show selected area** to open the detail panel."
             )
+
+with afford_tab:
+    _render_affordability_tab(
+        prices,
+        quarter,
+        building_type_code,
+        afford_inputs,
+        st.session_state.get("selected_postal_code"),
+    )
 
 with compare_tab:
     _render_compare_tab(prices, quarter, building_type_code, cpi, demographics)

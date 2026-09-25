@@ -65,10 +65,10 @@ def test_apptest_relationships_tab_with_fixtures(monkeypatch):
     at.run(timeout=60)
     assert not at.exception
 
-    if not at.tabs or len(at.tabs) < 3:
+    if not at.tabs or len(at.tabs) < 4:
         pytest.skip("Relationships tab not available in this AppTest version")
 
-    at.tabs[2].run(timeout=60)
+    at.tabs[3].run(timeout=60)
     assert not at.exception
 
     body = " ".join(getattr(el, "value", "") or "" for el in at.subheader)
@@ -91,7 +91,7 @@ def test_apptest_compare_tab_with_fixtures(monkeypatch):
     if not at.tabs:
         pytest.skip("AppTest tabs not available in this Streamlit version")
 
-    at.tabs[1].run(timeout=60)
+    at.tabs[2].run(timeout=60)
     assert not at.exception
 
     body = " ".join(getattr(el, "value", "") or "" for el in at.subheader)
@@ -116,7 +116,7 @@ def test_apptest_similar_for_selection_survives_deselecting_area(monkeypatch):
     if not at.tabs:
         pytest.skip("AppTest tabs not available in this Streamlit version")
 
-    at.tabs[1].run(timeout=60)
+    at.tabs[2].run(timeout=60)
     assert not at.exception
 
     multiselects = [ms for ms in at.multiselect if ms.key == "compare_multiselect"]
@@ -179,3 +179,31 @@ def test_apptest_add_to_compare_duplicate_does_not_show_success(monkeypatch):
     assert not at.exception
     assert not any("added to comparison" in (getattr(el, "value", "") or "") for el in at.success)
     assert at.session_state["compare_postal_codes"] == ["00100"]
+
+
+def test_apptest_affordability_tab_with_fixtures(monkeypatch):
+    apptest_mod = importlib.util.find_spec("streamlit.testing.v1")
+    if apptest_mod is None:
+        pytest.skip("streamlit.testing.v1.AppTest not available in this Streamlit version")
+
+    monkeypatch.setenv("HOUSING_USE_FIXTURES", "1")
+
+    from streamlit.testing.v1 import AppTest
+
+    at = AppTest.from_file(str(STREAMLIT_APP))
+    at.run(timeout=60)
+    assert not at.exception
+
+    if not at.tabs or len(at.tabs) < 2:
+        pytest.skip("Affordability tab not available in this AppTest version")
+
+    at.tabs[1].run(timeout=60)
+    assert not at.exception
+
+    body = " ".join(
+        getattr(el, "value", "") or ""
+        for group in (at.subheader, at.info, at.metric)
+        for el in group
+    )
+    assert "Affordability" in body
+    assert "illustration" in body.lower() or "not financial advice" in body.lower()
