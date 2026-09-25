@@ -44,6 +44,7 @@ from housing_analyzer.map import (
     NO_DATA_FILL,
     VALUE_COLORSCALE,
     MAP_LAYOUT_MARGINS,
+    base_map_layout_kwargs,
     _PCT_CHANGE_METRICS,
     _REAL_CHANGE_METRICS,
     _budget_ratio_and_category,
@@ -691,8 +692,7 @@ def build_hybrid_choropleth_figure(
         )
 
     fig.update_layout(
-        map_style="carto-positron",
-        margin=MAP_LAYOUT_MARGINS,
+        **base_map_layout_kwargs(),
         legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "x": 0},
     )
     return fig
@@ -817,8 +817,7 @@ def _build_hybrid_budget_figure(
         )
 
     fig.update_layout(
-        map_style="carto-positron",
-        margin=MAP_LAYOUT_MARGINS,
+        **base_map_layout_kwargs(),
         legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "x": 0},
     )
     return fig
