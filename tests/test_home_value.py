@@ -10,6 +10,7 @@ import pytest
 
 from housing_analyzer.home_value import (
     estimate_home_value,
+    indexed_area_chart_from_purchase,
     nearest_quarter_with_price,
 )
 ROOT = Path(__file__).resolve().parents[1]
@@ -155,6 +156,60 @@ def test_unknown_postal_code(cpi_q):
     )
     assert not result.enough_data
     assert any("99999" in n for n in result.notes)
+
+
+def test_estimate_with_all_building_types(cpi_q):
+    df = _frame(
+        _row("00100", "2018Q2", 2000.0, 12),
+        _row("00100", "2024Q4", 3000.0, 15),
+    )
+    result = estimate_home_value(
+        df,
+        cpi_q,
+        "00100",
+        None,
+        "2018Q2",
+        200_000.0,
+        latest_quarter="2024Q4",
+    )
+    assert result.enough_data
+    assert result.building_type is None
+    assert result.estimated_value == pytest.approx(300_000.0)
+    assert result.nominal_change_pct == pytest.approx(50.0)
+
+
+def test_real_change_unavailable_when_cpi_missing_for_latest_quarter(cpi_q):
+    df = _frame(
+        _row("00100", "2018Q2", 2000.0, 12),
+        _row("00100", "2024Q4", 3000.0, 15),
+    )
+    cpi_missing_latest = cpi_q.drop(index="2024Q4")
+    result = estimate_home_value(
+        df,
+        cpi_missing_latest,
+        "00100",
+        "1 — flat",
+        "2018Q2",
+        200_000.0,
+        latest_quarter="2024Q4",
+    )
+    assert result.enough_data
+    assert result.real_change_pct is None
+    assert any("inflation-adjusted change is unavailable" in n.lower() for n in result.notes)
+
+
+def test_indexed_area_chart_from_purchase():
+    df = _frame(
+        _row("00100", "2018Q2", 2000.0, 12),
+        _row("00100", "2018Q3", 2200.0, 12),
+        _row("00100", "2024Q4", 3000.0, 15),
+    )
+    fig = indexed_area_chart_from_purchase(df, "00100", "1 — flat", "2018Q2")
+    trace = fig.data[0]
+    assert list(trace.x) == ["2018Q2", "2018Q3", "2024Q4"]
+    assert trace.y[0] == pytest.approx(100.0)
+    assert trace.y[1] == pytest.approx(110.0)
+    assert trace.y[2] == pytest.approx(150.0)
 
 
 def test_apptest_my_home_tab_with_fixtures(monkeypatch):
