@@ -46,6 +46,7 @@ Pure helpers in `housing_analyzer/analysis/` turn the tidy price table into map 
 - **Rank and percentile** (`rank_percentile`): For one quarter, ranks areas by price (1 = most expensive). Areas without a price are not ranked. Tied prices share the same rank. When no single building type is chosen, the area price is a **transaction-weighted** average across types that have transaction counts; if none do, a simple mean of available prices is used—the result includes which method was applied.
 - **Regional average** (`regional_average`): For a caller-supplied mapping from postal codes to groups (for example municipalities), computes a group average for one quarter. Uses transaction-weighted averaging across areas when weights exist; otherwise falls back to a simple mean, and records which method was used.
 - **Area summary** (`summarize_area`): One dict with price, one- and five-year changes, reliability, rank, and percentile for a selected area and quarter.
+- **All areas at once** (`summarize_areas`, `area_prices_at`, `reliability_at`): The same numbers for every postal-code area in one pass over the data. The map uses these instead of calling `summarize_area` per area, so drawing the map does not slow down as the number of areas grows. A test checks that both give identical results.
 
 Nothing in this repository is investment advice.
 

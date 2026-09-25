@@ -14,8 +14,10 @@ from housing_analyzer.map import (
     build_choropleth_figure,
     latest_quarter_with_data,
     list_quarters,
+    postal_code_from_selection,
     prepare_map_dataframe,
     resolve_building_type_label,
+    search_area_matches,
 )
 
 st.set_page_config(page_title="Housing price analyzer", layout="wide")
@@ -36,21 +38,15 @@ def _load_housing_data() -> tuple:
     return prices, boundaries, manifest
 
 
+@st.cache_data(show_spinner=False)
+def _cached_map_frame(_prices, _boundaries, quarter, building_type_code, metric):
+    """Map table for one selection. The large inputs are not hashed (leading underscore);
+    the selection values are the cache key, so clicking the map does not recompute it."""
+    return prepare_map_dataframe(_prices, _boundaries, quarter, building_type_code, metric)
+
+
 def _friendly_load_error(exc: BaseException) -> str:
     return f"Could not load housing data: {exc}"
-
-
-def _search_matches(map_df, query: str) -> list[str]:
-    text = query.strip().lower()
-    if not text or map_df.empty:
-        return []
-    codes: list[str] = []
-    for _, row in map_df.iterrows():
-        postal = str(row["postal_code"]).zfill(5)
-        name = str(row.get("area_name") or "").lower()
-        if text in postal.lower() or text in name:
-            codes.append(postal)
-    return sorted(set(codes))
 
 
 def _render_summary_card(
@@ -125,13 +121,7 @@ with st.sidebar:
         index=0,
     )
 
-map_df = prepare_map_dataframe(
-    prices,
-    boundaries,
-    quarter,
-    building_type_code,
-    metric,
-)
+map_df = _cached_map_frame(prices, boundaries, quarter, building_type_code, metric)
 fig = build_choropleth_figure(map_df, boundaries, metric)
 
 with st.expander("How to read the map"):
@@ -159,21 +149,9 @@ selection = st.plotly_chart(
     key="housing_map",
 )
 
-clicked_code: str | None = None
-if selection is not None and getattr(selection, "selection", None):
-    points = selection.selection.get("points") if hasattr(selection.selection, "get") else None
-    if points:
-        for point in points:
-            custom = point.get("customdata") if isinstance(point, dict) else None
-            if custom:
-                clicked_code = str(custom[0]).zfill(5)
-                break
-            loc = point.get("location") if isinstance(point, dict) else None
-            if loc:
-                clicked_code = str(loc).zfill(5)
-                break
+clicked_code = postal_code_from_selection(selection)
 
-search_hits = _search_matches(map_df, search_query)
+search_hits = search_area_matches(map_df, search_query)
 if search_hits:
     picked = st.selectbox(
         "Matching areas",

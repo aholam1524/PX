@@ -242,15 +242,18 @@ def join_prices_to_areas(
         )
 
     all_codes = sorted(price_codes | boundary_codes)
+    # One dict lookup per area instead of filtering the whole price table per area.
+    price_by_code: dict[str, dict[str, Any]] = (
+        price_slice.set_index("postal_code")[
+            ["area_name", "price_per_sqm", "transactions"]
+        ].to_dict("index")
+        if not price_slice.empty
+        else {}
+    )
     rows: list[dict[str, Any]] = []
     for code in all_codes:
-        in_prices = code in price_codes
+        price_row = price_by_code.get(code)
         in_boundaries = code in boundary_codes
-        price_row = (
-            price_slice.loc[price_slice["postal_code"] == code].iloc[0]
-            if in_prices
-            else None
-        )
         area_name = ""
         if price_row is not None:
             name_val = price_row["area_name"]

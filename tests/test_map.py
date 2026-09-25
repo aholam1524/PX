@@ -19,7 +19,11 @@ from housing_analyzer.map import (
     latest_quarter_with_data,
     metric_color_range,
     metric_is_missing,
+    postal_code_from_selection,
     prepare_map_dataframe,
+    search_area_matches,
+    trailing_sales_by_area,
+    trailing_sales_sum,
 )
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -133,3 +137,120 @@ def test_color_range_ignores_nan(sample_prices_frame, sample_boundaries):
     assert not np.isnan(low)
     assert not np.isnan(high)
     assert low <= high
+
+
+def test_prepare_map_dataframe_does_not_compute_per_area_summaries(
+    sample_prices_frame, sample_boundaries, monkeypatch
+):
+    """The map must use the all-areas code path, not one full ranking per area."""
+    import housing_analyzer.analysis.metrics as metrics
+
+    def boom(*args, **kwargs):
+        raise AssertionError("per-area summary used while preparing the map")
+
+    monkeypatch.setattr(metrics, "summarize_area", boom)
+    monkeypatch.setattr(metrics, "rank_percentile", boom)
+    frame = prepare_map_dataframe(
+        sample_prices_frame, sample_boundaries, "2024Q4", "all", METRIC_PRICE
+    )
+    assert not frame.empty
+
+
+def test_prepare_map_dataframe_matches_per_area_values(
+    sample_prices_frame, sample_boundaries
+):
+    from housing_analyzer.analysis.metrics import summarize_area
+    from housing_analyzer.map import resolve_building_type_label
+
+    for code in ("all", "1", "2"):
+        frame = prepare_map_dataframe(
+            sample_prices_frame, sample_boundaries, "2024Q4", code, METRIC_PRICE
+        )
+        label = resolve_building_type_label(
+            sample_prices_frame, None if code == "all" else code
+        )
+        for _, row in frame.iterrows():
+            single = summarize_area(
+                sample_prices_frame, row["postal_code"], "2024Q4", building_type=label
+            )
+            if np.isnan(single["price_per_sqm"]):
+                assert np.isnan(row["price_per_sqm"])
+            else:
+                assert row["price_per_sqm"] == pytest.approx(single["price_per_sqm"])
+            assert (row["reliability"] or None) == single["reliability"]
+
+
+def test_trailing_sales_by_area_matches_single_area_sum(sample_prices_frame):
+    totals = trailing_sales_by_area(sample_prices_frame, "2024Q4", "1")
+    for postal, value in totals.items():
+        assert trailing_sales_sum(
+            sample_prices_frame, postal, "2024Q4", "1"
+        ) == pytest.approx(value)
+    assert np.isnan(trailing_sales_sum(sample_prices_frame, "99999", "2024Q4", "1"))
+
+
+def test_search_area_matches_by_code_and_name_case_insensitive():
+    frame = pd.DataFrame(
+        {
+            "postal_code": ["00100", "00120", "02100"],
+            "area_name": ["Helsinki keskusta", "Punavuori", "Tapiola"],
+        }
+    )
+    assert search_area_matches(frame, "0010") == ["00100"]
+    assert search_area_matches(frame, "punavuori") == ["00120"]
+    assert search_area_matches(frame, "  HELSINKI ") == ["00100"]
+    assert search_area_matches(frame, "001") == ["00100", "00120"]
+    assert search_area_matches(frame, "zzz") == []
+    assert search_area_matches(frame, "") == []
+    assert search_area_matches(frame.iloc[0:0], "001") == []
+
+
+def test_search_area_matches_treats_special_characters_literally():
+    frame = pd.DataFrame(
+        {"postal_code": ["00100", "00120"], "area_name": ["A (centre)", "B+C"]}
+    )
+    assert search_area_matches(frame, "(centre)") == ["00100"]
+    assert search_area_matches(frame, "b+c") == ["00120"]
+
+
+class _Event:
+    """Stands in for the selection event object that Streamlit returns."""
+
+    def __init__(self, selection):
+        self.selection = selection
+
+
+def test_postal_code_from_selection_prefers_customdata_then_location():
+    event = _Event({"points": [{"customdata": ["100", "Helsinki"]}]})
+    assert postal_code_from_selection(event) == "00100"
+    event = _Event({"points": [{"location": "2100"}]})
+    assert postal_code_from_selection(event) == "02100"
+    event = _Event({"points": [{"other": 1}, {"location": "00120"}]})
+    assert postal_code_from_selection(event) == "00120"
+
+
+def test_postal_code_from_selection_handles_empty_and_odd_input():
+    assert postal_code_from_selection(None) is None
+    assert postal_code_from_selection(_Event({})) is None
+    assert postal_code_from_selection(_Event({"points": []})) is None
+    assert (
+        postal_code_from_selection({"selection": {"points": [{"location": "00100"}]}})
+        == "00100"
+    )
+    assert postal_code_from_selection(object()) is None
+
+
+def test_each_map_trace_carries_only_its_own_areas(
+    sample_prices_frame, sample_boundaries
+):
+    frame = prepare_map_dataframe(
+        sample_prices_frame, sample_boundaries, "2024Q4", "all", METRIC_PRICE
+    )
+    fig = build_choropleth_figure(frame, sample_boundaries, METRIC_PRICE)
+    for trace in fig.data:
+        codes = {str(code).zfill(5) for code in trace.locations}
+        feature_codes = {
+            str(feature["properties"]["postal_code"]).zfill(5)
+            for feature in trace.geojson["features"]
+        }
+        assert feature_codes == codes

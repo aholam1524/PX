@@ -9,9 +9,9 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from housing_analyzer.analysis.metrics import (
-    _quarter_index,
-    _shift_quarter,
-    summarize_area,
+    quarter_index,
+    shift_quarter,
+    summarize_areas,
 )
 from housing_analyzer.data.boundaries import join_prices_to_areas
 
@@ -79,14 +79,37 @@ def latest_quarter_with_data(
     priced = filtered.loc[filtered["price_per_sqm"].notna()]
     if priced.empty:
         return None
-    quarters = sorted(priced["quarter"].unique(), key=_quarter_index)
+    quarters = sorted(priced["quarter"].unique(), key=quarter_index)
     return quarters[-1]
 
 
 def list_quarters(prices_df: pd.DataFrame) -> list[str]:
     if prices_df.empty:
         return []
-    return sorted(prices_df["quarter"].unique(), key=_quarter_index)
+    return sorted(prices_df["quarter"].unique(), key=quarter_index)
+
+
+def trailing_sales_by_area(
+    prices_df: pd.DataFrame,
+    quarter: str,
+    building_type_code: str | None,
+    *,
+    window: int = 4,
+) -> pd.Series:
+    """Sales over the trailing ``window`` quarters for every postal code at once.
+
+    Areas with no reported transaction count in the window are NaN (not zero).
+    """
+    quarters = {shift_quarter(quarter, offset) for offset in range(window)}
+    rows = _filter_building_type(
+        prices_df.loc[prices_df["quarter"].isin(quarters)], building_type_code
+    )
+    return (
+        rows["transactions"]
+        .astype(float)
+        .groupby(rows["postal_code"])
+        .sum(min_count=1)
+    )
 
 
 def trailing_sales_sum(
@@ -97,24 +120,10 @@ def trailing_sales_sum(
     *,
     window: int = 4,
 ) -> float:
-    area = prices_df.loc[prices_df["postal_code"] == str(postal_code).zfill(5)]
-    area = _filter_building_type(area, building_type_code)
-    if area.empty:
-        return float("nan")
-    total = 0
-    seen_any = False
-    for offset in range(window):
-        q = _shift_quarter(quarter, offset)
-        qrows = area.loc[area["quarter"] == q]
-        if qrows.empty:
-            continue
-        txs = qrows["transactions"].dropna()
-        if not txs.empty:
-            seen_any = True
-            total += int(txs.sum())
-    if not seen_any:
-        return float("nan")
-    return float(total)
+    totals = trailing_sales_by_area(
+        prices_df, quarter, building_type_code, window=window
+    )
+    return float(totals.get(str(postal_code).zfill(5), float("nan")))
 
 
 def _metric_raw_value(row: Mapping[str, Any], metric: str) -> float:
@@ -208,41 +217,96 @@ def prepare_map_dataframe(
     building_type_code: str | None,
     metric: str,
 ) -> pd.DataFrame:
-    """Join boundaries to metrics for one quarter, building type, and map layer."""
+    """Join boundaries to metrics for one quarter, building type, and map layer.
+
+    All areas are computed in one pass over the data (not one call per area), so
+    the cost does not grow with the number of postal-code areas squared.
+    """
     code = None if building_type_code in (None, "all") else building_type_code
     join = join_prices_to_areas(prices_df, boundaries, quarter, code)
-    frame = join.frame.copy()
+    frame = join.frame
+    if not frame.empty and "has_boundary" in frame.columns:
+        frame = frame.loc[frame["has_boundary"]]
+    if frame.empty:
+        return pd.DataFrame()
+
     bt_label = resolve_building_type_label(prices_df, code)
+    codes = frame["postal_code"].astype(str).str.zfill(5)
+    summaries = summarize_areas(prices_df, quarter, building_type=bt_label).reindex(codes)
+    sales = trailing_sales_by_area(prices_df, quarter, code).reindex(codes)
 
-    enriched_rows: list[dict[str, Any]] = []
-    for _, row in frame.iterrows():
-        postal = str(row["postal_code"]).zfill(5)
-        if not row.get("has_boundary", True):
-            continue
-        summary = summarize_area(
-            prices_df, postal, quarter, building_type=bt_label
-        )
-        sales = trailing_sales_sum(prices_df, postal, quarter, code)
-        enriched = {
-            "postal_code": postal,
-            "area_name": row["area_name"],
-            "price_per_sqm": summary["price_per_sqm"],
-            "pct_change_1y": summary["pct_change_1y"],
-            "pct_change_5y": summary["pct_change_5y"],
-            "sales_4q": sales,
-            "reliability": summary["reliability"],
-            "transactions_quarter": row["transactions"],
+    enriched = pd.DataFrame(
+        {
+            "postal_code": codes.to_numpy(),
+            "area_name": frame["area_name"].to_numpy(),
+            "price_per_sqm": summaries["price_per_sqm"].to_numpy(dtype=float),
+            "pct_change_1y": summaries["pct_change_1y"].to_numpy(dtype=float),
+            "pct_change_5y": summaries["pct_change_5y"].to_numpy(dtype=float),
+            "sales_4q": sales.to_numpy(dtype=float),
+            "reliability": [
+                value if isinstance(value, str) else None
+                for value in summaries["reliability"]
+            ],
+            "transactions_quarter": frame["transactions"].to_numpy(),
         }
-        enriched["missing"] = metric_is_missing(enriched, metric)
-        enriched["hover"] = format_hover_text(enriched, metric)
-        enriched_rows.append(enriched)
+    )
+    records = enriched.to_dict("records")
+    for record in records:
+        record["missing"] = metric_is_missing(record, metric)
+        record["hover"] = format_hover_text(record, metric)
+    return pd.DataFrame(records)
 
-    return pd.DataFrame(enriched_rows)
+
+def search_area_matches(map_df: pd.DataFrame, query: str) -> list[str]:
+    """Postal codes whose code or area name contains ``query`` (case-insensitive)."""
+    text = query.strip().lower()
+    if not text or map_df.empty:
+        return []
+    codes = map_df["postal_code"].astype(str).str.zfill(5)
+    names = map_df["area_name"].fillna("").astype(str).str.lower()
+    mask = codes.str.contains(text, regex=False) | names.str.contains(text, regex=False)
+    return sorted(set(codes[mask]))
 
 
-def _colorscale_with_opacity(base: str, opacity: float) -> list[list[Any]]:
-    """Return a two-stop colorscale for Plotly (values 0..1)."""
-    return [[0.0, base], [1.0, base]]
+def postal_code_from_selection(selection: Any) -> str | None:
+    """Postal code of the first point in a Streamlit plotly selection event, if any."""
+    if selection is None:
+        return None
+    payload = getattr(selection, "selection", None)
+    if payload is None and isinstance(selection, Mapping):
+        payload = selection.get("selection")
+    if not payload or not hasattr(payload, "get"):
+        return None
+    for point in payload.get("points") or []:
+        if not isinstance(point, Mapping):
+            continue
+        custom = point.get("customdata")
+        if custom:
+            return str(custom[0]).zfill(5)
+        location = point.get("location")
+        if location:
+            return str(location).zfill(5)
+    return None
+
+
+def _solid_colorscale(color: str) -> list[list[Any]]:
+    """Return a one-colour two-stop colorscale for Plotly (values 0..1)."""
+    return [[0.0, color], [1.0, color]]
+
+
+def _feature_subset(boundaries: Mapping[str, Any], codes: Any) -> dict[str, Any]:
+    """GeoJSON with only the features for ``codes``, so each map trace carries its own areas.
+
+    Passing the whole country to every trace roughly doubles the size of the figure that
+    has to be built and sent to the browser on every interaction.
+    """
+    wanted = {str(code).zfill(5) for code in codes}
+    features = [
+        feature
+        for feature in boundaries.get("features") or []
+        if str((feature.get("properties") or {}).get("postal_code", "")).zfill(5) in wanted
+    ]
+    return {"type": "FeatureCollection", "features": features}
 
 
 def build_choropleth_figure(
@@ -282,7 +346,7 @@ def build_choropleth_figure(
         line_color = np.where(low, "#616161", "white")
         fig.add_trace(
             go.Choroplethmap(
-                geojson=boundaries,
+                geojson=_feature_subset(boundaries, with_data["postal_code"]),
                 locations=with_data["postal_code"],
                 z=with_data[metric],
                 featureidkey="properties.postal_code",
@@ -307,11 +371,11 @@ def build_choropleth_figure(
     if not missing.empty:
         fig.add_trace(
             go.Choroplethmap(
-                geojson=boundaries,
+                geojson=_feature_subset(boundaries, missing["postal_code"]),
                 locations=missing["postal_code"],
                 z=[0.0] * len(missing),
                 featureidkey="properties.postal_code",
-                colorscale=_colorscale_with_opacity(MISSING_COLOR, 1.0),
+                colorscale=_solid_colorscale(MISSING_COLOR),
                 zmin=0,
                 zmax=1,
                 showscale=False,
