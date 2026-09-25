@@ -92,6 +92,7 @@ from housing_analyzer.panel import (
     build_trend_chart_data,
     build_trend_figure,
     building_type_panel_options,
+    default_selected_postal_code,
     flag_unusual_quarter_changes,
     format_area_header,
     municipality_name_from_prices,
@@ -962,7 +963,7 @@ with map_tab:
             st.caption(reason)
 
     if "selected_postal_code" not in st.session_state:
-        st.session_state.selected_postal_code = None
+        st.session_state.selected_postal_code = default_selected_postal_code(prices)
     if "selected_map_level" not in st.session_state:
         st.session_state.selected_map_level = "postal"
 
