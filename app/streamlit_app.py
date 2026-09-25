@@ -315,6 +315,14 @@ def _render_affordability_tab(
 
     max_affordable = _compute_max_affordable(afford)
     st.metric("Maximum affordable price", f"{max_affordable:,.0f} EUR")
+    if (
+        afford["down_mode"] == "percent"
+        and float(afford["down_payment_value"]) >= 100.0
+    ):
+        st.caption(
+            "A 100%+ down payment covers any price from savings alone, so this isn't "
+            "limited by your monthly budget."
+        )
 
     use_percent = afford["down_mode"] == "percent"
     if afford["price_source"] == "target":

@@ -150,6 +150,9 @@ def build_compare_chart_data(
     use_real: bool = False,
     cpi_quarterly: pd.Series | None = None,
 ) -> CompareChartData:
+    # Local import: a module-level import here would be circular. map.py imports
+    # housing_analyzer.analysis.metrics, which loads this package's __init__ (and
+    # this module) before panel.py (which imports map.py) has finished importing.
     from housing_analyzer.panel import index_series_to_100, quarterly_area_prices
 
     work_df = prices_df

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any, Mapping
 
 import numpy as np
@@ -343,6 +344,18 @@ def prepare_map_dataframe(
     return pd.DataFrame(records)
 
 
+def _budget_ratio_and_category(
+    typical_price: float, max_affordable_price: float
+) -> tuple[float, str]:
+    """Ratio/category for one area, treating a non-positive budget as unaffordable
+    rather than raising (a 0 EUR max affordable price is a valid user input, e.g.
+    100% down payment)."""
+    if max_affordable_price <= 0:
+        return float("inf"), BUDGET_FIT_OVER
+    ratio = price_to_budget_ratio(typical_price, max_affordable_price)
+    return ratio, classify_budget_fit_ratio(ratio)
+
+
 def format_budget_fit_hover(
     row: Mapping[str, Any],
     *,
@@ -361,13 +374,13 @@ def format_budget_fit_hover(
             f"Reliability: {reliability_display(row.get('reliability'))}"
         )
     typical = typical_dwelling_price(float(price_sqm), size_sqm)
-    ratio = price_to_budget_ratio(typical, max_affordable_price)
-    category = classify_budget_fit_ratio(ratio)
+    ratio, category = _budget_ratio_and_category(typical, max_affordable_price)
+    ratio_display = "∞" if math.isinf(ratio) else f"{ratio:.2f}"
     lines = [
         f"<b>{postal}</b> {name}",
         f"Typical price ({size_sqm:g} m²): {typical:,.0f} EUR",
         f"Max affordable: {max_affordable_price:,.0f} EUR",
-        f"Ratio to budget: {ratio:.2f}",
+        f"Ratio to budget: {ratio_display}",
         f"Fits budget: {BUDGET_FIT_LABELS[category]}",
         f"Reliability: {reliability_display(row.get('reliability'))}",
     ]
@@ -412,8 +425,7 @@ def prepare_budget_fit_dataframe(
             missing = True
         else:
             typical = typical_dwelling_price(float(price_sqm), size_sqm)
-            ratio = price_to_budget_ratio(typical, max_affordable_price)
-            category = classify_budget_fit_ratio(ratio)
+            ratio, category = _budget_ratio_and_category(typical, max_affordable_price)
             missing = False
         record = dict(row)
         record["budget_ratio"] = ratio

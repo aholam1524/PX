@@ -24,6 +24,7 @@ from housing_analyzer.data.prices import parse_json_stat2
 from housing_analyzer.map import (
     METRIC_FITS_BUDGET,
     build_choropleth_figure,
+    format_budget_fit_hover,
     prepare_budget_fit_dataframe,
 )
 
@@ -153,6 +154,32 @@ def test_prepare_budget_fit_dataframe_colours_and_missing(
 
     fig = build_choropleth_figure(frame, sample_boundaries, METRIC_FITS_BUDGET)
     assert fig.data
+
+
+def test_prepare_budget_fit_dataframe_zero_budget_is_over_not_error(
+    sample_prices_frame, sample_boundaries, cpi_df
+):
+    """A 0 EUR max affordable price (e.g. 100% down payment) is a valid input;
+    priced areas should be classified as over budget rather than raising."""
+    frame = prepare_budget_fit_dataframe(
+        sample_prices_frame,
+        sample_boundaries,
+        "2024Q4",
+        "1",
+        50.0,
+        0.0,
+        cpi_df=cpi_df,
+    )
+    row_ok = frame.loc[frame["postal_code"] == "00100"].iloc[0]
+    assert not bool(row_ok["missing"])
+    assert row_ok["budget_fit"] == BUDGET_FIT_OVER
+
+
+def test_format_budget_fit_hover_zero_budget_is_over_not_error():
+    row = {"postal_code": "00100", "area_name": "Test", "price_per_sqm": 5000.0}
+    hover = format_budget_fit_hover(row, max_affordable_price=0.0, size_sqm=50.0)
+    assert "More than 20% over budget" in hover
+    assert "Max affordable: 0 EUR" in hover
 
 
 def test_classify_at_exact_budget_and_twenty_percent_over():
