@@ -13,11 +13,13 @@ from housing_analyzer.data.prices import parse_json_stat2
 from housing_analyzer.map import (
     METRIC_CHANGE_1Y,
     METRIC_CHANGE_1Y_REAL,
+    METRIC_CHANGE_5Y,
     METRIC_PRICE,
     METRIC_SALES,
     NO_CPI_HOVER,
     NO_DATA_HOVER,
     build_choropleth_figure,
+    default_map_quarter,
     format_hover_text,
     latest_quarter_with_data,
     metric_color_range,
@@ -62,9 +64,84 @@ def test_latest_quarter_with_data(sample_prices_frame):
 
 def test_metric_color_range_pct_change_symmetric():
     values = pd.Series([-10.0, 5.0, 20.0])
-    low, high = metric_color_range(values, METRIC_CHANGE_1Y)
+    low, high = metric_color_range(values, METRIC_CHANGE_1Y, use_full_range=True)
     assert low == pytest.approx(-20.0)
     assert high == pytest.approx(20.0)
+
+
+def test_metric_color_range_clips_outlier_narrower_than_min_max():
+    values = pd.Series([1000.0, 1100.0, 1200.0, 1300.0, 50_000.0])
+    low_clip, high_clip = metric_color_range(values, METRIC_PRICE)
+    low_full, high_full = metric_color_range(values, METRIC_PRICE, use_full_range=True)
+    assert low_full == pytest.approx(1000.0)
+    assert high_full == pytest.approx(50_000.0)
+    assert high_clip - low_clip < high_full - low_full
+
+
+def test_metric_color_range_percentile_zero_and_hundred_equals_min_max():
+    values = pd.Series([10.0, 20.0, 30.0, 40.0])
+    low, high = metric_color_range(
+        values, METRIC_PRICE, percentile_low=0, percentile_high=100
+    )
+    assert low == pytest.approx(10.0)
+    assert high == pytest.approx(40.0)
+
+
+def test_metric_color_range_change_layers_symmetric_with_clip():
+    values = pd.Series([-30.0, -5.0, 8.0, 25.0, 100.0])
+    low, high = metric_color_range(values, METRIC_CHANGE_5Y)
+    assert low == pytest.approx(-high)
+    assert high >= 1.0
+
+
+def test_metric_color_range_empty_and_all_equal():
+    low, high = metric_color_range(pd.Series(dtype=float), METRIC_PRICE)
+    assert low == 0.0
+    assert high == 1.0
+    low, high = metric_color_range(pd.Series([5.0, 5.0, 5.0]), METRIC_PRICE)
+    assert low == pytest.approx(5.0)
+    assert high == pytest.approx(6.0)
+
+
+def _synthetic_prices_quarters(
+    quarter_counts: list[tuple[str, int]], *, base_code: int = 10000
+) -> pd.DataFrame:
+    rows: list[dict[str, object]] = []
+    for quarter, n_areas in quarter_counts:
+        for i in range(n_areas):
+            rows.append(
+                {
+                    "postal_code": f"{base_code + i:05d}",
+                    "quarter": quarter,
+                    "building_type": "1 — test",
+                    "price_per_sqm": 2000.0,
+                    "transactions": 10,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def test_default_map_quarter_skips_thin_newest_quarter():
+    # Prior quarters ~100 areas; newest only ~80.
+    history = [(f"2024Q{i}", 100) for i in range(1, 5)]
+    history.append(("2025Q1", 80))
+    df = _synthetic_prices_quarters(history)
+    assert default_map_quarter(df) == "2024Q4"
+
+
+def test_default_map_quarter_picks_newest_when_coverage_similar():
+    history = [(f"2024Q{i}", 100) for i in range(1, 4)] + [("2024Q4", 95), ("2025Q1", 98)]
+    df = _synthetic_prices_quarters(history)
+    assert default_map_quarter(df) == "2025Q1"
+
+
+def test_default_map_quarter_short_history_falls_back_to_latest():
+    df = _synthetic_prices_quarters([("2024Q4", 50)])
+    assert default_map_quarter(df) == "2024Q4"
+
+
+def test_default_map_quarter_empty_returns_none():
+    assert default_map_quarter(pd.DataFrame()) is None
 
 
 def test_missing_metric_not_treated_as_zero():
