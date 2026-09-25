@@ -7,6 +7,8 @@ import streamlit as st
 
 from housing_analyzer.analysis.metrics import summarize_area
 from housing_analyzer.data import load_boundaries, load_manifest, load_prices
+from housing_analyzer.data.paths import use_fixtures
+from housing_analyzer.data.snapshot import snapshot_is_complete
 from housing_analyzer.map import (
     BUILDING_TYPE_CHOICES,
     METRIC_CHOICES,
@@ -28,6 +30,19 @@ st.write(
     "with trends and comparisons for a selected area."
 )
 st.caption("For information only — not investment advice.")
+
+if not use_fixtures() and not snapshot_is_complete():
+    st.error(
+        "The housing data snapshot is not in this checkout yet, so the app cannot load "
+        "prices or map boundaries without a long live download."
+    )
+    st.info(
+        "Repository owners: run the **Refresh housing data** workflow in GitHub Actions "
+        "(Actions → Refresh housing data → Run workflow). That job rebuilds "
+        "`data/snapshot/` and opens a pull request; merge it so hosted and cold starts "
+        "use the committed snapshot."
+    )
+    st.stop()
 
 
 @st.cache_data(show_spinner=False)
@@ -121,8 +136,17 @@ with st.sidebar:
         index=0,
     )
 
+boundary_edition = None
+if manifest:
+    boundaries_meta = (manifest.get("files") or {}).get("boundaries.geojson.gz") or {}
+    if isinstance(boundaries_meta, dict):
+        boundary_edition = boundaries_meta.get("boundary_edition")
+
 map_df = _cached_map_frame(prices, boundaries, quarter, building_type_code, metric)
 fig = build_choropleth_figure(map_df, boundaries, metric)
+
+if boundary_edition:
+    st.caption(f"Map boundaries: {boundary_edition} (Statistics Finland).")
 
 with st.expander("How to read the map"):
     st.markdown(
@@ -171,11 +195,7 @@ if selected:
     _render_summary_card(prices, selected, quarter, building_type_code)
 
 st.divider()
-footer_parts = [
-    "Data: Statistics Finland — "
-    "[Prices per square metre by postal code (PxWeb)](https://pxdata.stat.fi/PxWeb/api/v1/en/StatFin/ashi/13mt.px) "
-    "and [postal-code boundaries (WFS)](https://geo.stat.fi/geoserver/postialue/wfs)."
-]
 if manifest and manifest.get("fetch_date"):
-    footer_parts.append(f" Snapshot fetched {manifest['fetch_date']}.")
-st.caption("".join(footer_parts))
+    st.caption(f"Data as of {manifest['fetch_date']}, source: Statistics Finland.")
+else:
+    st.caption("Data source: Statistics Finland.")
