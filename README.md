@@ -104,3 +104,11 @@ Happy path needs no labels. To retry a failed launch: `agent-dev` on an **issue*
 Factory behavior (Fixer, Conflict, one open feature PR) is the ASD dispatcher. Feature PRs merge into `dev` automatically after review and fix; you merge into `main` yourself. `main` is never auto-merged.
 
 Watch SDK-launched agents (Dev, Test, Fixer, Conflict) in Cursor: Agents → Filter → Source → SDK. Review and the fix pass run in the **Claude review** workflow, not as a Cursor cloud agent.
+
+## Usage reporting
+
+When **Claude review** runs on a feature PR (`agent-review`), the workflow posts **one** PR comment (updated after each job) with a table of **review**, **fix**, and **merge** job usage: Claude turns, input/output/cache token counts, an **API-equivalent cost estimate**, Linux runner minutes (billed, rounded up), and estimated Linux cost. The same table is written to each job’s GitHub Actions step summary.
+
+Token cost in that comment is **not** what you pay: review and fix use your Claude subscription (`CLAUDE_CODE_OAUTH_TOKEN`), so the dollar figure is only an API-equivalent estimate. On this **public** repo, hosted Linux runner minutes are **free** (`billed: $0.00`); the comment still shows what Actions would cost on a private repo. Override the per-minute rate with the repository variable `ACTIONS_LINUX_RATE_PER_MIN` (default `0.006`).
+
+**Cursor cloud agents** (Dev, Test, Fixer, Conflict) are **not** included in that comment; their usage is on the [Cursor dashboard](https://cursor.com/dashboard).
