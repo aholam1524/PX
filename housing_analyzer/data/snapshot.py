@@ -18,6 +18,8 @@ from housing_analyzer.data.boundaries import (
     load_boundaries,
 )
 from housing_analyzer.data import paths as data_paths
+from housing_analyzer.data.cpi import API_URL as CPI_API_URL
+from housing_analyzer.data.cpi import fetch_cpi, load_cpi
 from housing_analyzer.data.prices import API_URL, fetch_prices, load_prices
 
 BOUNDARIES_SOURCE_URL = (
@@ -31,6 +33,7 @@ def snapshot_is_complete() -> bool:
     return (
         data_paths.PRICES_SNAPSHOT_FILE.is_file()
         and data_paths.BOUNDARIES_SNAPSHOT_FILE.is_file()
+        and data_paths.CPI_SNAPSHOT_FILE.is_file()
         and data_paths.MANIFEST_FILE.is_file()
     )
 
@@ -73,6 +76,12 @@ def _write_prices_snapshot(frame: pd.DataFrame, path: Path) -> int:
     return path.stat().st_size
 
 
+def _write_cpi_snapshot(frame: pd.DataFrame, path: Path) -> int:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    frame.to_csv(path, index=False, compression="gzip")
+    return path.stat().st_size
+
+
 def _write_boundaries_snapshot(collection: dict[str, Any], path: Path) -> int:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(collection, ensure_ascii=False, separators=(",", ":"))
@@ -87,6 +96,8 @@ def build_manifest(
     prices_bytes: int,
     boundaries_features: int,
     boundaries_bytes: int,
+    cpi_rows: int = 0,
+    cpi_bytes: int = 0,
     fetch_date: date | None = None,
 ) -> dict[str, Any]:
     """Build manifest metadata for a snapshot directory."""
@@ -104,8 +115,13 @@ def build_manifest(
             "boundary_edition": EDITION_LABEL,
             "feature_type": FEATURE_TYPE,
         },
+        "cpi.csv.gz": {
+            "bytes": cpi_bytes,
+            "rows": cpi_rows,
+            "source_url": CPI_API_URL,
+        },
     }
-    total = prices_bytes + boundaries_bytes
+    total = prices_bytes + boundaries_bytes + cpi_bytes
     return {
         "fetch_date": when.isoformat(),
         "files": files,
@@ -116,6 +132,7 @@ def build_manifest(
 def write_snapshot(
     prices: pd.DataFrame,
     boundaries: dict[str, Any],
+    cpi: pd.DataFrame,
     *,
     fetch_date: date | None = None,
 ) -> dict[str, Any]:
@@ -124,12 +141,15 @@ def write_snapshot(
     boundaries_bytes = _write_boundaries_snapshot(
         boundaries, data_paths.BOUNDARIES_SNAPSHOT_FILE
     )
+    cpi_bytes = _write_cpi_snapshot(cpi, data_paths.CPI_SNAPSHOT_FILE)
     features = boundaries.get("features") or []
     manifest = build_manifest(
         prices_rows=len(prices),
         prices_bytes=prices_bytes,
         boundaries_features=len(features),
         boundaries_bytes=boundaries_bytes,
+        cpi_rows=len(cpi),
+        cpi_bytes=cpi_bytes,
         fetch_date=fetch_date,
     )
     data_paths.SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
@@ -145,10 +165,12 @@ def build_snapshot(*, refresh: bool = True) -> dict[str, Any]:
     if refresh:
         prices = fetch_prices(refresh=True)
         boundaries = fetch_boundaries()
+        cpi = fetch_cpi()
     else:
         prices = load_prices(refresh=False)
         boundaries = load_boundaries(refresh=False)
-    return write_snapshot(prices, boundaries)
+        cpi = load_cpi(refresh=False)
+    return write_snapshot(prices, boundaries, cpi)
 
 
 def _format_size(num_bytes: int) -> str:
