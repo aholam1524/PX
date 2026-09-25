@@ -4,13 +4,13 @@ App repo. The agent factory lives in [aholam1524/ASD](https://github.com/aholam1
 
 Describe the work in Cursor chat in this repo. The agent files a GitHub issue; that **queues** the work (label `factory-queued`). You run **Start factory** in Actions to begin Dev on the oldest queued issue. Code moves `feature/N-slug` → `dev` → `test` → `main`. You merge into `dev` and `main`. Merge into `test` is automatic when the Test agent reports PASS and CI is green.
 
-When Dev pushes `feature/*`, the factory opens a PR **into `dev`**, adds `agent-review`, and starts Review (even if the Dev agent forgot to open the PR).
+When Dev pushes `feature/*`, the factory opens a PR **into `dev`**, adds `agent-review`, and the **Claude review** workflow runs in GitHub Actions (even if the Dev agent forgot to open the PR).
 
 ```text
 You describe work in Cursor
     → Agent files a GitHub issue (queued)
     → Start factory (Actions) → Dev agent: branch feature/<issue>-<slug>
-    → Push opens PR into dev, labels agent-review, starts Review
+    → Push opens PR into dev, labels agent-review, Claude reviews in Actions
     → You merge into dev
     → Factory opens PR dev → test and starts Test
     → Test PASS + CI green → automatic merge into test
@@ -22,11 +22,13 @@ You describe work in Cursor
 
 1. Repo secret `CURSOR_API_KEY` from [Cursor Dashboard → Integrations](https://cursor.com/dashboard/integrations).
 
-2. Grant this repository to the Cursor GitHub app (clone + open PRs).
+2. Repo secret **`CLAUDE_CODE_OAUTH_TOKEN`**: a Claude subscription token (Pro, Max, Team, or Enterprise — not an API key). On your machine run `claude setup-token`, then add the token as a repository secret with this name. Review runs through [claude-code-action](https://github.com/anthropics/claude-code-action) and **counts against your Claude subscription usage limits**. The workflow uses `${{ secrets.GITHUB_TOKEN }}` for PR comments; you do not need the [Claude GitHub App](https://github.com/apps/claude) unless you prefer app-based auth instead.
 
-3. Add repo secret **`FACTORY_GITHUB_TOKEN`**: a GitHub classic PAT (scope `repo`) or a fine-grained token with Contents, Issues, and Pull requests read/write on **this repo and ASD**, created as **your user**. The factory uses it to open PRs as you and to check out ASD. PRs opened as `github-actions[bot]` sit on **Approve workflows** and follow-up jobs (including `test` → `main`) may never start. Without this secret those waits come back.
+3. Grant this repository to the Cursor GitHub app (clone + open PRs).
 
-4. Create long-lived branches if they do not exist (the factory will also create them from `main` on first promote):
+4. Add repo secret **`FACTORY_GITHUB_TOKEN`**: a GitHub classic PAT (scope `repo`) or a fine-grained token with Contents, Issues, and Pull requests read/write on **this repo and ASD**, created as **your user**. The factory uses it to open PRs as you and to check out ASD. PRs opened as `github-actions[bot]` sit on **Approve workflows** and follow-up jobs (including `test` → `main`) may never start. Without this secret those waits come back.
+
+5. Create long-lived branches if they do not exist (the factory will also create them from `main` on first promote):
 
    ```bash
    git fetch origin
@@ -37,12 +39,12 @@ You describe work in Cursor
    git checkout -b test && git push -u origin test
    ```
 
-5. Retry labels (create once; ignore "already exists"):
+6. Retry labels (create once; ignore "already exists"):
 
    ```bash
    gh label create agent-dev --color 1D76DB --description "Retry the Dev cloud agent"
    gh label create agent-test --color 0E8A16 --description "Retry the Test cloud agent"
-   gh label create agent-review --color 5319E7 --description "Retry the Review cloud agent"
+   gh label create agent-review --color 5319E7 --description "Retry Claude review in GitHub Actions"
    gh label create agent-fix --color D93F0B --description "Retry the Fixer cloud agent"
    gh label create agent-conflict --color FBCA04 --description "Retry the Conflict cloud agent"
    ```
@@ -66,8 +68,8 @@ You describe work in Cursor
    | --- | --- |
    | `factory-queued` | Issue filed; waiting for **Start factory** |
    | `factory-dev` | Dev agent running |
-   | `factory-review` | (Reserved) Review agent on the feature PR |
-   | `factory-waiting-dev` | Review agent launched; merge the feature PR into `dev` when Review finishes |
+   | `factory-review` | Claude review running on the feature PR (Actions) |
+   | `factory-waiting-dev` | Claude review launched; merge the feature PR into `dev` when review finishes |
    | `factory-test` | Test agent on a promotion PR (`dev`→`test` or re-test after fix) |
    | `factory-fixer` | Fixer agent on the feature PR |
    | `factory-conflict` | Conflict agent on the `dev`→`test` PR |
@@ -93,7 +95,7 @@ That starts Dev on the oldest open issue with the `factory-queued` label. If the
 ## How to use it
 
 1. In Cursor, say what you want built. The agent creates the issue in this repo; it is queued automatically. No label required.
-2. Run **Start factory** (see above). Wait for a PR from `feature/<number>-<slug>` **into `dev`** (opened on push if Dev only pushed a branch). Review starts automatically.
+2. Run **Start factory** (see above). Wait for a PR from `feature/<number>-<slug>` **into `dev`** (opened on push if Dev only pushed a branch). Adding `agent-review` triggers **Claude review** in Actions automatically.
 3. You merge that PR into `dev`.
 4. The factory opens `dev` → `test`, runs Test, then CI. On PASS + green CI it merges into `test` and opens `test` → `main`.
 5. Read Test comments on the main PR. You merge into `main`. That closes the ticket issue (label `factory-done`). After that merge, the next open issue with `factory-queued` starts Dev automatically (same rules as **Start factory**).
@@ -102,4 +104,4 @@ Happy path needs no labels. To retry a failed launch: `agent-dev` on an **issue*
 
 Factory behavior (Fixer, Conflict, one open feature PR) is the ASD dispatcher. You merge into `dev` and `main` yourself; `main` is never auto-merged.
 
-Watch SDK-launched agents in Cursor: Agents → Filter → Source → SDK.
+Watch SDK-launched agents (Dev, Test, Fixer, Conflict) in Cursor: Agents → Filter → Source → SDK. Review runs in the **Claude review** workflow, not as a Cursor cloud agent.
