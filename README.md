@@ -4,7 +4,7 @@ App repo. The agent factory lives in [aholam1524/ASD](https://github.com/aholam1
 
 ## Housing price analyzer
 
-Interactive map and analysis for **Finnish housing prices** by postal-code area. The Streamlit app shows a **MapLibre choropleth** of postal-code boundaries coloured by your chosen metric (price per square metre, nominal or inflation-adjusted 1- or 5-year change, or sales in the last four quarters). Use the sidebar to pick quarter and building type; hover for details, click or search to select an area. The **area detail panel** (beside the map) shows key figures, rank and reliability, a quarterly **trend chart** with municipality and national comparison lines (gaps where data is missing), sales volume from 2020, flagged unusual quarter-on-quarter moves, and a CSV download. Grey areas have no published price; lighter borders and hover notes mark low-reliability estimates.
+Interactive map and analysis for **Finnish housing prices** by postal-code area. The Streamlit app has **Map** and **Compare** tabs. On **Map**, a **MapLibre choropleth** colours postal-code boundaries by your chosen metric (price per square metre, nominal or inflation-adjusted 1- or 5-year change, or sales in the last four quarters). Use the sidebar to pick quarter and building type; hover for details, click or search to select an area. The **area detail panel** (beside the map) shows key figures, rank and reliability, a quarterly **trend chart** with municipality and national comparison lines (gaps where data is missing), sales volume from 2020, flagged unusual quarter-on-quarter moves, and a CSV download; you can **add the selected area to comparison**. On **Compare**, pick up to four areas (search by postal code or name) to see a side-by-side metrics table, one multi-series price chart (optional index to 100 at the start), and **similar areas** for a chosen comparison area. Grey areas have no published price; lighter borders and hover notes mark low-reliability estimates.
 
 **Run locally** (Python 3.12):
 
@@ -63,6 +63,8 @@ Pure helpers in `housing_analyzer/analysis/` turn the tidy price table into map 
 - **Regional average** (`regional_average`): For a caller-supplied mapping from postal codes to groups (for example municipalities), computes a group average for one quarter. Uses transaction-weighted averaging across areas when weights exist; otherwise falls back to a simple mean, and records which method was used.
 - **Area summary** (`summarize_area`): One dict with price, one- and five-year changes, reliability, rank, and percentile for a selected area and quarter.
 - **All areas at once** (`summarize_areas`, `area_prices_at`, `reliability_at`): The same numbers for every postal-code area in one pass over the data. The map uses these instead of calling `summarize_area` per area, so drawing the map does not slow down as the number of areas grows. A test checks that both give identical results.
+- **Compare tab** (`housing_analyzer/analysis/compare.py`): Builds the comparison table and multi-area price chart from the same summaries and trailing sales as the map.
+- **Similar areas** (`housing_analyzer/analysis/similar_areas.py`): Among areas with reliability `"ok"` and complete feature data, ranks the five closest to a target using weighted Euclidean distance on **z-scored** features (today: price per m² and 5-year change; weights live in `SIMILARITY_FEATURES` for future income/demographics). Ties break on postal code.
 
 Nothing in this repository is investment advice.
 

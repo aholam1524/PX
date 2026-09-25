@@ -5,8 +5,18 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
+from housing_analyzer.analysis.compare import (
+    area_catalog,
+    build_compare_chart_data,
+    build_compare_figure,
+    build_comparison_table,
+    search_area_catalog,
+    summaries_for_compare,
+)
 from housing_analyzer.analysis.metrics import summarize_area
+from housing_analyzer.analysis.similar_areas import similar_areas, similar_areas_explanation
 from housing_analyzer.data import load_boundaries, load_cpi, load_manifest, load_prices
+from housing_analyzer.data.cpi import cpi_by_quarter
 from housing_analyzer.data.paths import use_fixtures
 from housing_analyzer.data.snapshot import snapshot_is_complete
 from housing_analyzer.map import (
@@ -20,6 +30,7 @@ from housing_analyzer.map import (
     prepare_map_dataframe,
     resolve_building_type_label,
     search_area_matches,
+    trailing_sales_by_area,
 )
 from housing_analyzer.panel import (
     area_detail_export_frame,
@@ -36,6 +47,8 @@ from housing_analyzer.panel import (
     resolve_panel_building_type,
     trailing_sales_count,
 )
+
+MAX_COMPARE_AREAS = 4
 
 st.set_page_config(page_title="Housing price analyzer", layout="wide")
 
@@ -115,6 +128,143 @@ def _format_building_type_display(
         return "All building types"
     label = resolve_building_type_label(prices, building_type_code)
     return label or dict(BUILDING_TYPE_CHOICES).get(building_type_code, building_type_code)
+
+
+def _init_compare_session_state() -> None:
+    if "compare_postal_codes" not in st.session_state:
+        st.session_state.compare_postal_codes = []
+
+
+def _add_to_compare(postal_code: str) -> bool:
+    code = str(postal_code).zfill(5)
+    current: list[str] = list(st.session_state.compare_postal_codes)
+    if code in current:
+        return False
+    if len(current) >= MAX_COMPARE_AREAS:
+        st.warning(f"Comparison is limited to {MAX_COMPARE_AREAS} areas. Remove one to add another.")
+        return False
+    current.append(code)
+    st.session_state.compare_postal_codes = current
+    # The Compare tab's multiselect owns its own widget state once created, so its
+    # `default=` is ignored on reruns; update it directly or this add is lost the
+    # moment `_render_compare_tab` re-renders the multiselect later in this run.
+    if "compare_multiselect" in st.session_state:
+        st.session_state.compare_multiselect = current
+    return True
+
+
+def _format_compare_option(catalog: pd.DataFrame, code: str) -> str:
+    row = catalog.loc[catalog["postal_code"] == code]
+    name = str(row["area_name"].iloc[0]) if not row.empty else ""
+    return f"{code} — {name}".strip(" —")
+
+
+def _render_compare_tab(
+    prices: pd.DataFrame,
+    quarter: str,
+    building_type_code: str | None,
+    cpi: pd.DataFrame,
+) -> None:
+    _init_compare_session_state()
+    catalog = area_catalog(prices)
+    bt_label = resolve_building_type_label(prices, building_type_code)
+
+    st.subheader("Compare areas")
+    st.caption(
+        f"Quarter **{quarter}** · {_format_building_type_display(prices, building_type_code)}"
+    )
+
+    search_query = st.text_input(
+        "Search by postal code or area name",
+        placeholder="e.g. 00100 or Punavuori",
+        key="compare_search",
+    )
+    search_hits = search_area_catalog(catalog, search_query)
+    options = sorted(set(catalog["postal_code"].astype(str).str.zfill(5)))
+    if search_hits:
+        options = search_hits + [c for c in options if c not in search_hits]
+
+    selected = st.multiselect(
+        "Areas to compare (up to four)",
+        options=options,
+        default=[
+            c
+            for c in st.session_state.compare_postal_codes
+            if c in options
+        ][:MAX_COMPARE_AREAS],
+        format_func=lambda c: _format_compare_option(catalog, c),
+        key="compare_multiselect",
+        max_selections=MAX_COMPARE_AREAS,
+    )
+    st.session_state.compare_postal_codes = selected[:MAX_COMPARE_AREAS]
+
+    if not selected:
+        st.info("Choose one to four areas to see the comparison table and chart.")
+        return
+
+    cpi_quarterly = cpi_by_quarter(cpi)
+    summaries = summaries_for_compare(
+        prices, quarter, bt_label, cpi_quarterly=cpi_quarterly
+    )
+    sales = trailing_sales_by_area(prices, quarter, building_type_code)
+    include_real = "pct_change_1y_real" in summaries.columns
+
+    table = build_comparison_table(
+        summaries,
+        sales,
+        selected,
+        include_real=include_real,
+    )
+    st.dataframe(table, use_container_width=True)
+
+    index_mode = st.checkbox(
+        "Index to 100 at the start",
+        key="compare_index",
+    )
+    chart_data = build_compare_chart_data(
+        prices,
+        selected,
+        bt_label,
+        index_to_100=index_mode,
+        use_real=False,
+        cpi_quarterly=cpi_quarterly,
+    )
+    st.plotly_chart(
+        build_compare_figure(chart_data),
+        use_container_width=True,
+        key="compare_chart",
+    )
+
+    st.markdown("### Similar areas")
+    st.caption(similar_areas_explanation())
+    if st.session_state.get("similar_for") not in selected:
+        st.session_state.similar_for = selected[0]
+    similar_for = st.selectbox(
+        "Similar areas for",
+        options=selected,
+        format_func=lambda c: _format_compare_option(catalog, c),
+        key="similar_for",
+    )
+    matches = similar_areas(summaries, similar_for)
+    if not matches:
+        st.write("No similar areas with OK reliability and complete price data.")
+    else:
+        rows = []
+        for item in matches:
+            rows.append(
+                {
+                    "Postal code": item.postal_code,
+                    "Distance": f"{item.distance:.3f}",
+                    "Price per m²": f"{item.price_per_sqm:,.0f}",
+                    "1y change": f"{item.pct_change_1y:+.1f}%",
+                    "5y change": f"{item.pct_change_5y:+.1f}%",
+                    "Rank": int(item.rank) if pd.notna(item.rank) else "—",
+                    "Percentile": f"{item.percentile:.0f}"
+                    if item.percentile == item.percentile
+                    else "—",
+                }
+            )
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 
 def _render_detail_panel(
@@ -198,6 +348,10 @@ def _render_detail_panel(
         f"{pct:.0f}th" if pct == pct else "—",
     )
     st.caption(rel_text)
+
+    if st.button("Add to comparison", key=f"add_compare_{code}"):
+        if _add_to_compare(code):
+            st.success(f"{code} added to comparison.")
 
     trend_data = _cached_trend_chart_data(
         prices,
@@ -296,70 +450,80 @@ if manifest:
     if isinstance(boundaries_meta, dict):
         boundary_edition = boundaries_meta.get("boundary_edition")
 
-map_df = _cached_map_frame(prices, boundaries, cpi, quarter, building_type_code, metric)
-fig = build_choropleth_figure(map_df, boundaries, metric)
+_init_compare_session_state()
 
-if boundary_edition:
-    st.caption(f"Map boundaries: {boundary_edition} (Statistics Finland).")
+map_tab, compare_tab = st.tabs(["Map", "Compare"])
 
-with st.expander("How to read the map"):
-    st.markdown(
-        "- **Coloured areas** show the selected metric for the chosen quarter and building type.\n"
-        "- **Grey areas** have no published price for that selection "
-        f"({METRIC_PRICE.replace('_', ' ')} missing or suppressed); they are never shown as zero.\n"
-        "- **Lighter fill** and the hover note *Based on few sales* mark **low reliability** "
-        "(fewer than ten sales in the last four quarters).\n"
-        "- Hover a region for postal code, area name, metric value, sales, and reliability."
-    )
+with map_tab:
+    map_df = _cached_map_frame(prices, boundaries, cpi, quarter, building_type_code, metric)
+    fig = build_choropleth_figure(map_df, boundaries, metric)
 
-if "selected_postal_code" not in st.session_state:
-    st.session_state.selected_postal_code = None
+    if boundary_edition:
+        st.caption(f"Map boundaries: {boundary_edition} (Statistics Finland).")
 
-map_col, detail_col = st.columns([3, 2])
-
-with map_col:
-    search_query = st.text_input(
-        "Search by postal code or area name",
-        placeholder="e.g. 00100 or Punavuori",
-    )
-
-    selection = st.plotly_chart(
-        fig,
-        use_container_width=True,
-        on_select="rerun",
-        key="housing_map",
-    )
-
-    clicked_code = postal_code_from_selection(selection)
-
-    search_hits = search_area_matches(map_df, search_query)
-    if search_hits:
-        picked = st.selectbox(
-            "Matching areas",
-            options=search_hits,
-            format_func=lambda c: f"{c} — {map_df.loc[map_df['postal_code']==c, 'area_name'].iloc[0]}",
+    with st.expander("How to read the map"):
+        st.markdown(
+            "- **Coloured areas** show the selected metric for the chosen quarter and building type.\n"
+            "- **Grey areas** have no published price for that selection "
+            f"({METRIC_PRICE.replace('_', ' ')} missing or suppressed); they are never shown as zero.\n"
+            "- **Lighter fill** and the hover note *Based on few sales* mark **low reliability** "
+            "(fewer than ten sales in the last four quarters).\n"
+            "- Hover a region for postal code, area name, metric value, sales, and reliability."
         )
-        if st.button("Show selected area"):
-            st.session_state.selected_postal_code = picked
-    elif search_query.strip():
-        st.caption("No areas match your search.")
 
-    if clicked_code:
-        st.session_state.selected_postal_code = clicked_code
+    if "selected_postal_code" not in st.session_state:
+        st.session_state.selected_postal_code = None
 
-with detail_col:
-    selected = st.session_state.selected_postal_code
-    if selected:
-        _render_detail_panel(
-            prices,
-            boundaries,
-            cpi,
-            selected,
-            quarter,
-            building_type_code,
+    map_col, detail_col = st.columns([3, 2])
+
+    with map_col:
+        search_query = st.text_input(
+            "Search by postal code or area name",
+            placeholder="e.g. 00100 or Punavuori",
         )
-    else:
-        st.info("Click a map area or search and choose **Show selected area** to open the detail panel.")
+
+        selection = st.plotly_chart(
+            fig,
+            use_container_width=True,
+            on_select="rerun",
+            key="housing_map",
+        )
+
+        clicked_code = postal_code_from_selection(selection)
+
+        search_hits = search_area_matches(map_df, search_query)
+        if search_hits:
+            picked = st.selectbox(
+                "Matching areas",
+                options=search_hits,
+                format_func=lambda c: f"{c} — {map_df.loc[map_df['postal_code']==c, 'area_name'].iloc[0]}",
+            )
+            if st.button("Show selected area"):
+                st.session_state.selected_postal_code = picked
+        elif search_query.strip():
+            st.caption("No areas match your search.")
+
+        if clicked_code:
+            st.session_state.selected_postal_code = clicked_code
+
+    with detail_col:
+        selected = st.session_state.selected_postal_code
+        if selected:
+            _render_detail_panel(
+                prices,
+                boundaries,
+                cpi,
+                selected,
+                quarter,
+                building_type_code,
+            )
+        else:
+            st.info(
+                "Click a map area or search and choose **Show selected area** to open the detail panel."
+            )
+
+with compare_tab:
+    _render_compare_tab(prices, quarter, building_type_code, cpi)
 
 st.divider()
 footer_parts = [
