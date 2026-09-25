@@ -12,3 +12,13 @@ BOUNDARIES_SNAPSHOT_FILE = SNAPSHOT_DIR / "boundaries.geojson.gz"
 MANIFEST_FILE = SNAPSHOT_DIR / "manifest.json"
 
 MAX_SNAPSHOT_TOTAL_BYTES = 20 * 1024 * 1024
+
+FIXTURES_DIR = _REPO_ROOT / "tests" / "fixtures"
+PRICES_FIXTURE_FILE = FIXTURES_DIR / "prices_sample.json"
+BOUNDARIES_FIXTURE_FILE = FIXTURES_DIR / "boundaries_sample.geojson"
+
+
+def use_fixtures() -> bool:
+    import os
+
+    return os.environ.get("HOUSING_USE_FIXTURES") == "1"
