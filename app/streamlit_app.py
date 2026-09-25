@@ -831,7 +831,7 @@ with map_tab:
                 prices, quarter, building_type_code
             )
             if typical_coverage is not None and not quarter_meets_coverage_threshold(
-                prices, quarter, building_type_code
+                prices, quarter, building_type_code, typical=typical_coverage
             ):
                 price_areas = count_areas_with_published_price(
                     prices, quarter, building_type_code

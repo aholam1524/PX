@@ -197,11 +197,17 @@ def quarter_meets_coverage_threshold(
     *,
     ratio: float = PROVISIONAL_COVERAGE_RATIO,
     prior_quarters: int = PRIOR_QUARTERS_FOR_COVERAGE,
+    typical: float | None = None,
 ) -> bool:
-    """True when ``quarter`` has at least ``ratio`` of the median prior-quarter coverage."""
-    typical = _median_prior_quarter_coverage(
-        prices_df, quarter, building_type_code, prior_quarters=prior_quarters
-    )
+    """True when ``quarter`` has at least ``ratio`` of the median prior-quarter coverage.
+
+    ``typical`` can be passed in when the caller already computed it (e.g. via
+    :func:`typical_quarter_price_coverage`) to avoid recomputing the median twice.
+    """
+    if typical is None:
+        typical = _median_prior_quarter_coverage(
+            prices_df, quarter, building_type_code, prior_quarters=prior_quarters
+        )
     if typical is None or typical <= 0:
         return True
     count = count_areas_with_published_price(prices_df, quarter, building_type_code)
