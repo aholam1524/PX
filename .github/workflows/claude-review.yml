@@ -69,3 +69,128 @@ jobs:
             --model claude-sonnet-5
             --max-turns 15
             --allowedTools "Read,Glob,Grep,Bash(gh pr comment:*),Bash(gh pr review:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
+
+  fix:
+    needs: review
+    if: >
+      github.event.action == 'labeled' &&
+      github.event.label.name == 'agent-review' &&
+      github.event.pull_request.base.ref == 'dev'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
+    env:
+      GH_TOKEN: ${{ secrets.FACTORY_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+    steps:
+      - name: Check fix marker
+        id: marker
+        run: |
+          MARKER="<!-- factory:claude-fix:${PR_NUMBER} -->"
+          echo "marker=${MARKER}" >> "$GITHUB_OUTPUT"
+          if gh pr view "$PR_NUMBER" --json comments --jq '.comments[].body' | grep -Fq "$MARKER"; then
+            echo "already_fixed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "already_fixed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Post fix marker
+        if: steps.marker.outputs.already_fixed != 'true'
+        run: gh pr comment "$PR_NUMBER" --body "${{ steps.marker.outputs.marker }}"
+
+      - name: Checkout PR head branch
+        if: steps.marker.outputs.already_fixed != 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          token: ${{ secrets.FACTORY_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Configure git author
+        if: steps.marker.outputs.already_fixed != 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Build fix prompt
+        if: steps.marker.outputs.already_fixed != 'true'
+        id: build-fix-prompt
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          cat > /tmp/fix-prompt.md <<'EOF'
+          You are applying one automated fix pass after Claude review on this pull request.
+
+          Read the review comments on this PR (conversation comments and inline review comments). Apply only fixes that are clearly correct and in scope of the ticket. Add or update tests where a fix changes behavior. Run the repository's tests if any exist. Commit and push to the PR's branch only when you make changes.
+
+          If the review found nothing important, or there is nothing safe to fix, make no commit.
+
+          Rules:
+          - Work on the existing PR head branch only; do not create a new branch.
+          - Do not open pull requests, merge, or change labels.
+          - Do not edit `.github/`, `.cursor/`, or anything under `.asd-factory/` (ASD factory).
+          - Use `git add`, `git commit`, and `git push` only for your fixes on this branch.
+          - You may use `gh pr view` and `gh pr comment` to read the PR and post a brief summary if helpful.
+          EOF
+          {
+            printf '\n\n## Pull request\n\n'
+            printf 'Number: %s\n' "$PR_NUMBER"
+            printf 'Title: %s\n' "$PR_TITLE"
+            printf 'URL: %s\n\n' "$PR_URL"
+            printf 'Branch: %s\n\n' "$HEAD_REF"
+            printf '### Description\n\n%s\n' "$PR_BODY"
+          } >> /tmp/fix-prompt.md
+          delimiter="$(openssl rand -hex 16)"
+          {
+            echo "prompt<<${delimiter}"
+            cat /tmp/fix-prompt.md
+            echo "${delimiter}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Run Claude fix pass
+        if: steps.marker.outputs.already_fixed != 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.FACTORY_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
+          prompt: ${{ steps.build-fix-prompt.outputs.prompt }}
+          claude_args: |
+            --model claude-sonnet-5
+            --max-turns 25
+            --allowedTools "Read,Edit,Write,Glob,Grep,Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(pytest:*),Bash(python:*),Bash(npm:*),Bash(npx:*),Bash(make:*),Bash(cargo:*),Bash(go test:*),Bash(go:*)"
+
+  merge:
+    needs: fix
+    if: >
+      github.event.action == 'labeled' &&
+      github.event.label.name == 'agent-review' &&
+      github.event.pull_request.base.ref == 'dev'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+    steps:
+      - name: Wait for checks and merge into dev
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if ! gh pr checks "$PR_NUMBER" --watch --fail-fast; then
+            gh pr comment "$PR_NUMBER" --body "Factory: automatic merge into \`dev\` skipped — one or more required CI checks did not pass after the Claude fix pass."
+            exit 0
+          fi
+          if ! gh pr merge "$PR_NUMBER" --merge; then
+            gh pr comment "$PR_NUMBER" --body "Factory: automatic merge into \`dev\` failed (for example the PR may already be merged or checks regressed). Please merge manually if the PR is still open and CI is green."
+            exit 0
+          fi
