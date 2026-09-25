@@ -28,7 +28,13 @@ from housing_analyzer.affordability import (
     typical_dwelling_price,
 )
 
-MISSING_COLOR = "#bdbdbd"
+MISSING_COLOR = "#e5e7eb"
+MISSING_OUTLINE_COLOR = "#d1d5db"
+MISSING_OUTLINE_WIDTH = 0.3
+PROVISIONAL_COVERAGE_RATIO = 0.85
+PRIOR_QUARTERS_FOR_COVERAGE = 8
+DEFAULT_COLOR_PERCENTILE_LOW = 2.0
+DEFAULT_COLOR_PERCENTILE_HIGH = 98.0
 BUDGET_FIT_COLOR_WITHIN = "#2e7d32"
 BUDGET_FIT_COLOR_STRETCH = "#f9a825"
 BUDGET_FIT_COLOR_OVER = "#c62828"
@@ -135,6 +141,93 @@ def latest_quarter_with_data(
     return quarters[-1]
 
 
+def count_areas_with_published_price(
+    prices_df: pd.DataFrame, quarter: str, building_type_code: str | None = None
+) -> int:
+    """Postal codes with a published price in ``quarter`` (after building-type filter)."""
+    filtered = _filter_building_type(prices_df, building_type_code)
+    if filtered.empty:
+        return 0
+    rows = filtered.loc[
+        (filtered["quarter"] == quarter) & filtered["price_per_sqm"].notna()
+    ]
+    return int(rows["postal_code"].nunique())
+
+
+def _median_prior_quarter_coverage(
+    prices_df: pd.DataFrame,
+    quarter: str,
+    building_type_code: str | None,
+    *,
+    prior_quarters: int = PRIOR_QUARTERS_FOR_COVERAGE,
+) -> float | None:
+    filtered = _filter_building_type(prices_df, building_type_code)
+    if filtered.empty:
+        return None
+    quarters = sorted(filtered["quarter"].unique(), key=quarter_index)
+    if quarter not in quarters:
+        return None
+    idx = quarters.index(quarter)
+    prior = quarters[max(0, idx - prior_quarters) : idx]
+    if not prior:
+        return None
+    counts = [
+        count_areas_with_published_price(prices_df, q, building_type_code) for q in prior
+    ]
+    return float(np.median(counts))
+
+
+def typical_quarter_price_coverage(
+    prices_df: pd.DataFrame,
+    quarter: str,
+    building_type_code: str | None = None,
+    *,
+    prior_quarters: int = PRIOR_QUARTERS_FOR_COVERAGE,
+) -> float | None:
+    """Median number of areas with a published price over the prior ``prior_quarters``."""
+    return _median_prior_quarter_coverage(
+        prices_df, quarter, building_type_code, prior_quarters=prior_quarters
+    )
+
+
+def quarter_meets_coverage_threshold(
+    prices_df: pd.DataFrame,
+    quarter: str,
+    building_type_code: str | None = None,
+    *,
+    ratio: float = PROVISIONAL_COVERAGE_RATIO,
+    prior_quarters: int = PRIOR_QUARTERS_FOR_COVERAGE,
+    typical: float | None = None,
+) -> bool:
+    """True when ``quarter`` has at least ``ratio`` of the median prior-quarter coverage.
+
+    ``typical`` can be passed in when the caller already computed it (e.g. via
+    :func:`typical_quarter_price_coverage`) to avoid recomputing the median twice.
+    """
+    if typical is None:
+        typical = _median_prior_quarter_coverage(
+            prices_df, quarter, building_type_code, prior_quarters=prior_quarters
+        )
+    if typical is None or typical <= 0:
+        return True
+    count = count_areas_with_published_price(prices_df, quarter, building_type_code)
+    return count >= ratio * typical
+
+
+def default_map_quarter(
+    prices_df: pd.DataFrame, building_type_code: str | None = None
+) -> str | None:
+    """Latest quarter with enough published-price coverage; else latest with any price."""
+    filtered = _filter_building_type(prices_df, building_type_code)
+    if filtered.empty:
+        return None
+    quarters = sorted(filtered["quarter"].unique(), key=quarter_index)
+    for quarter in reversed(quarters):
+        if quarter_meets_coverage_threshold(prices_df, quarter, building_type_code):
+            return quarter
+    return latest_quarter_with_data(prices_df, building_type_code)
+
+
 def list_quarters(prices_df: pd.DataFrame) -> list[str]:
     if prices_df.empty:
         return []
@@ -194,15 +287,32 @@ def metric_is_missing(row: Mapping[str, Any], metric: str) -> bool:
     return np.isnan(_metric_raw_value(row, metric))
 
 
-def metric_color_range(values: pd.Series, metric: str) -> tuple[float, float]:
+def metric_color_range(
+    values: pd.Series,
+    metric: str,
+    *,
+    percentile_low: float = DEFAULT_COLOR_PERCENTILE_LOW,
+    percentile_high: float = DEFAULT_COLOR_PERCENTILE_HIGH,
+    use_full_range: bool = False,
+) -> tuple[float, float]:
     valid = values.dropna()
     if valid.empty:
         return 0.0, 1.0
+    clip = not use_full_range and not (
+        percentile_low <= 0 and percentile_high >= 100
+    )
     if metric in _PCT_CHANGE_METRICS:
-        bound = max(float(valid.abs().max()), 1.0)
+        if clip:
+            bound = max(float(np.percentile(valid.abs(), percentile_high)), 1.0)
+        else:
+            bound = max(float(valid.abs().max()), 1.0)
         return -bound, bound
-    low = float(valid.min())
-    high = float(valid.max())
+    if clip:
+        low = float(np.percentile(valid, percentile_low))
+        high = float(np.percentile(valid, percentile_high))
+    else:
+        low = float(valid.min())
+        high = float(valid.max())
     if low == high:
         return low, low + 1.0
     return low, high
@@ -543,7 +653,12 @@ def build_budget_fit_choropleth_figure(
                 zmin=0,
                 zmax=1,
                 showscale=False,
-                marker={"line": {"width": 0.5, "color": "#757575"}},
+                marker={
+                    "line": {
+                        "width": MISSING_OUTLINE_WIDTH,
+                        "color": MISSING_OUTLINE_COLOR,
+                    }
+                },
                 hovertext=missing["hover"],
                 hoverinfo="text",
                 name="No price data",
@@ -631,7 +746,12 @@ def build_choropleth_figure(
                 zmin=0,
                 zmax=1,
                 showscale=False,
-                marker={"line": {"width": 0.5, "color": "#757575"}},
+                marker={
+                    "line": {
+                        "width": MISSING_OUTLINE_WIDTH,
+                        "color": MISSING_OUTLINE_COLOR,
+                    }
+                },
                 hovertext=missing["hover"],
                 hoverinfo="text",
                 name="No data",
