@@ -105,6 +105,43 @@ def area_display_name(prices_df: pd.DataFrame, postal_code: str) -> str:
     return _MUNICIPALITY_SUFFIX.sub("", name).strip()
 
 
+def _header_text_part(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, float) and np.isnan(value):
+        return ""
+    text = str(value).strip()
+    return text
+
+
+def format_area_header(
+    postal_code: Any,
+    area_name: Any,
+    municipality: Any,
+) -> str:
+    """Single markdown line: bold postal code, area name, municipality after a comma."""
+    code_raw = _header_text_part(postal_code)
+    code = code_raw.zfill(5) if code_raw else ""
+    name = _header_text_part(area_name)
+    muni = _header_text_part(municipality)
+
+    show_muni = bool(muni)
+    if show_muni and name:
+        if name.casefold() == muni.casefold():
+            show_muni = False
+        elif name.casefold().endswith(muni.casefold()):
+            show_muni = False
+
+    line = ""
+    if code:
+        line = f"**{code}**"
+    if name:
+        line = f"{line} {name}".strip() if line else name
+    if show_muni:
+        line = f"{line}, {muni}" if line else muni
+    return line
+
+
 def postal_to_municipality_group(boundaries: Mapping[str, Any]) -> dict[str, str]:
     """Map each boundary postal code to its municipality code (``kunta``)."""
     mapping: dict[str, str] = {}

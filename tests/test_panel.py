@@ -14,6 +14,7 @@ from housing_analyzer.panel import (
     area_detail_export_frame,
     build_trend_chart_data,
     flag_unusual_quarter_changes,
+    format_area_header,
     index_series_to_100,
     municipality_name_from_prices,
     quarter_on_quarter_changes,
@@ -33,6 +34,42 @@ def sample_prices_frame() -> pd.DataFrame:
 def sample_boundaries() -> dict:
     with (FIXTURES / "boundaries_sample.geojson").open(encoding="utf-8") as handle:
         return json.load(handle)
+
+
+def test_format_area_header_normal():
+    assert (
+        format_area_header("00100", "Helsinki keskusta – Etu-Töölö", "Helsinki")
+        == "**00100** Helsinki keskusta – Etu-Töölö, Helsinki"
+    )
+
+
+def test_format_area_header_no_municipality():
+    assert format_area_header("00100", "Punavuori", None) == "**00100** Punavuori"
+    assert format_area_header("00100", "Punavuori", "") == "**00100** Punavuori"
+
+
+def test_format_area_header_municipality_equals_area_name():
+    assert format_area_header("00100", "Helsinki", "Helsinki") == "**00100** Helsinki"
+
+
+def test_format_area_header_name_ends_with_municipality():
+    assert (
+        format_area_header("00100", "Keskusta Helsinki", "Helsinki")
+        == "**00100** Keskusta Helsinki"
+    )
+
+
+def test_format_area_header_empty_area_name():
+    assert format_area_header("00100", "", "Helsinki") == "**00100**, Helsinki"
+    assert format_area_header("00100", None, "Helsinki") == "**00100**, Helsinki"
+
+
+def test_format_area_header_empty_municipality_string():
+    assert format_area_header("00100", "Punavuori", "   ") == "**00100** Punavuori"
+
+
+def test_format_area_header_non_string_inputs():
+    assert format_area_header(100, "Area", "Helsinki") == "**00100** Area, Helsinki"
 
 
 def test_municipality_name_from_prices_parentheses(sample_prices_frame):
