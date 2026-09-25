@@ -1,0 +1,4 @@
+postal_code,data_year,population,median_income_eur,share_age_65_plus,share_higher_education
+00100,2024,1200,45000.0,0.12,0.35
+00200,2024,800,38000.0,0.18,0.22
+00300,2024,950,52000.0,0.15,0.41

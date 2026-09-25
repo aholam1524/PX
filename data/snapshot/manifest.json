@@ -17,7 +17,33 @@
       "bytes": 1823,
       "rows": 656,
       "source_url": "https://pxdata.stat.fi/PxWeb/api/v1/en/StatFin/khi/11xs.px"
+    },
+    "demographics.csv.gz": {
+      "bytes": 68260,
+      "rows": 3018,
+      "source_url": "https://pxdata.stat.fi/PxWeb/api/v1/en/Postinumeroalueittainen_avoin_tieto/uusin \u2014 tables 12ey.px, 12f1.px, 12ez.px (year 2024)",
+      "paavo_tables": {
+        "population": "https://pxdata.stat.fi/PxWeb/api/v1/en/Postinumeroalueittainen_avoin_tieto/uusin/12ey.px",
+        "income": "https://pxdata.stat.fi/PxWeb/api/v1/en/Postinumeroalueittainen_avoin_tieto/uusin/12f1.px",
+        "education": "https://pxdata.stat.fi/PxWeb/api/v1/en/Postinumeroalueittainen_avoin_tieto/uusin/12ez.px"
+      },
+      "data_year": "2024",
+      "variable_codes": {
+        "population": "he_vakiy",
+        "age_65_plus_bands": [
+          "he_65_69",
+          "he_70_74",
+          "he_75_79",
+          "he_80_84",
+          "he_85_"
+        ],
+        "median_income": "hr_mtu",
+        "higher_education": "ko_yl_kork",
+        "adults_18_plus": "ko_ika18y",
+        "postal": "postinumeroalue_4_20260101",
+        "year": "timeperiod_y"
+      }
     }
   },
-  "total_bytes": 4465543
+  "total_bytes": 4533803
 }
