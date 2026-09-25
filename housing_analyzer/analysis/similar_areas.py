@@ -14,9 +14,14 @@ SIMILARITY_FEATURES: tuple[tuple[str, float], ...] = (
     ("pct_change_5y", 1.0),
 )
 
+OPTIONAL_SIMILARITY_FEATURES: tuple[tuple[str, float], ...] = (
+    ("median_income_eur", 1.0),
+)
+
 SIMILARITY_METHOD_SENTENCE = (
     "Similar areas are the five closest among areas with OK reliability, measured "
-    "with weighted Euclidean distance on z-scored price per m² and 5-year change "
+    "with weighted Euclidean distance on z-scored price per m², 5-year change, and "
+    "median income when income is available for the target area "
     "(each feature centered and scaled across the eligible pool)."
 )
 
@@ -36,8 +41,12 @@ def _normalize_code(postal_code: str) -> str:
     return str(postal_code).zfill(5)
 
 
-def _feature_columns() -> tuple[str, ...]:
-    return tuple(name for name, _ in SIMILARITY_FEATURES)
+def _feature_columns_for_target(target_row: pd.Series) -> tuple[tuple[str, float], ...]:
+    features: list[tuple[str, float]] = list(SIMILARITY_FEATURES)
+    for name, weight in OPTIONAL_SIMILARITY_FEATURES:
+        if pd.notna(target_row.get(name)):
+            features.append((name, weight))
+    return tuple(features)
 
 
 def _weighted_distance(
@@ -64,18 +73,20 @@ def similar_areas(
     if summaries.empty or target not in summaries.index:
         return []
 
-    features = _feature_columns()
-    weights = np.array([w for _, w in SIMILARITY_FEATURES], dtype=float)
-
     pool = summaries.loc[summaries[reliability_column] == "ok"].copy()
     if pool.empty or target not in pool.index:
         return []
 
-    complete = pool.dropna(subset=list(features))
+    target_row = pool.loc[target]
+    feature_defs = _feature_columns_for_target(target_row)
+    feature_names = tuple(name for name, _ in feature_defs)
+    weights = np.array([w for _, w in feature_defs], dtype=float)
+
+    complete = pool.dropna(subset=list(feature_names))
     if target not in complete.index:
         return []
 
-    values = complete[list(features)].astype(float)
+    values = complete[list(feature_names)].astype(float)
     means = values.mean(axis=0).to_numpy()
     stds = values.std(axis=0, ddof=0).to_numpy()
     stds = np.where(stds == 0.0, 1.0, stds)

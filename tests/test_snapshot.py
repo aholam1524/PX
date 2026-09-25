@@ -37,6 +37,9 @@ def snapshot_dir(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(data_paths, "MANIFEST_FILE", snap / "manifest.json")
     monkeypatch.setattr(data_paths, "CPI_SNAPSHOT_FILE", snap / "cpi.csv.gz")
+    monkeypatch.setattr(
+        data_paths, "DEMOGRAPHICS_SNAPSHOT_FILE", snap / "demographics.csv.gz"
+    )
     return snap
 
 
@@ -63,6 +66,7 @@ def test_build_manifest_fields():
     )
     assert manifest["fetch_date"]
     assert manifest["total_bytes"] == 3100
+    assert "demographics.csv.gz" in manifest["files"]
     assert manifest["files"]["prices.csv.gz"]["rows"] == 10
     assert manifest["files"]["boundaries.geojson.gz"]["features"] == 3
     assert "boundary_edition" in manifest["files"]["boundaries.geojson.gz"]
@@ -90,10 +94,33 @@ def sample_cpi_frame() -> pd.DataFrame:
     )
 
 
+@pytest.fixture
+def sample_demographics_frame() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "postal_code": ["00100"],
+            "data_year": [2024],
+            "population": [100.0],
+            "median_income_eur": [40000.0],
+            "share_age_65_plus": [0.1],
+            "share_higher_education": [0.3],
+        }
+    )
+
+
 def test_write_snapshot_and_load_manifest(
-    snapshot_dir, sample_prices_frame, sample_boundaries, sample_cpi_frame
+    snapshot_dir,
+    sample_prices_frame,
+    sample_boundaries,
+    sample_cpi_frame,
+    sample_demographics_frame,
 ):
-    manifest = write_snapshot(sample_prices_frame, sample_boundaries, sample_cpi_frame)
+    manifest = write_snapshot(
+        sample_prices_frame,
+        sample_boundaries,
+        sample_cpi_frame,
+        sample_demographics_frame,
+    )
     assert data_paths.MANIFEST_FILE.is_file()
     assert data_paths.PRICES_SNAPSHOT_FILE.is_file()
     assert data_paths.BOUNDARIES_SNAPSHOT_FILE.is_file()
@@ -109,9 +136,15 @@ def test_load_prices_reads_snapshot(
     sample_prices_frame,
     sample_boundaries,
     sample_cpi_frame,
+    sample_demographics_frame,
     monkeypatch,
 ):
-    write_snapshot(sample_prices_frame, sample_boundaries, sample_cpi_frame)
+    write_snapshot(
+        sample_prices_frame,
+        sample_boundaries,
+        sample_cpi_frame,
+        sample_demographics_frame,
+    )
     cache_file = snapshot_dir.parent / "housing_prices.pkl"
     monkeypatch.setattr(prices_mod, "CACHE_FILE", cache_file)
     sample_prices_frame.to_pickle(cache_file)
@@ -130,9 +163,15 @@ def test_load_prices_refresh_bypasses_snapshot(
     sample_prices_frame,
     sample_boundaries,
     sample_cpi_frame,
+    sample_demographics_frame,
     monkeypatch,
 ):
-    write_snapshot(sample_prices_frame, sample_boundaries, sample_cpi_frame)
+    write_snapshot(
+        sample_prices_frame,
+        sample_boundaries,
+        sample_cpi_frame,
+        sample_demographics_frame,
+    )
 
     fetched = sample_prices_frame.head(1).copy()
 
@@ -151,9 +190,18 @@ def test_load_prices_refresh_bypasses_snapshot(
 
 
 def test_load_boundaries_reads_snapshot(
-    snapshot_dir, sample_prices_frame, sample_boundaries, sample_cpi_frame
+    snapshot_dir,
+    sample_prices_frame,
+    sample_boundaries,
+    sample_cpi_frame,
+    sample_demographics_frame,
 ):
-    write_snapshot(sample_prices_frame, sample_boundaries, sample_cpi_frame)
+    write_snapshot(
+        sample_prices_frame,
+        sample_boundaries,
+        sample_cpi_frame,
+        sample_demographics_frame,
+    )
 
     def fail_fetch(_url: str) -> dict:
         raise AssertionError("WFS should not run when snapshot exists")
@@ -168,9 +216,15 @@ def test_load_boundaries_refresh_bypasses_snapshot(
     sample_prices_frame,
     sample_boundaries,
     sample_cpi_frame,
+    sample_demographics_frame,
     monkeypatch,
 ):
-    write_snapshot(sample_prices_frame, sample_boundaries, sample_cpi_frame)
+    write_snapshot(
+        sample_prices_frame,
+        sample_boundaries,
+        sample_cpi_frame,
+        sample_demographics_frame,
+    )
 
     with BOUNDARIES_SAMPLE.open(encoding="utf-8") as handle:
         fetched = json.load(handle)

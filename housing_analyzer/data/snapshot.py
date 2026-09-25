@@ -20,7 +20,20 @@ from housing_analyzer.data.boundaries import (
 from housing_analyzer.data import paths as data_paths
 from housing_analyzer.data.cpi import API_URL as CPI_API_URL
 from housing_analyzer.data.cpi import fetch_cpi, load_cpi
+from housing_analyzer.data.demographics import (
+    DEFAULT_DATA_YEAR,
+    PAAVO_BASE,
+    TABLE_EDUCATION,
+    TABLE_INCOME,
+    TABLE_POPULATION,
+    fetch_demographics,
+    load_demographics,
+)
 from housing_analyzer.data.prices import API_URL, fetch_prices, load_prices
+
+DEMOGRAPHICS_SOURCE_NOTE = (
+    f"{PAAVO_BASE} — tables 12ey.px, 12f1.px, 12ez.px (year {DEFAULT_DATA_YEAR})"
+)
 
 BOUNDARIES_SOURCE_URL = (
     f"{WFS_BASE}?service=WFS&version=2.0.0&request=GetFeature"
@@ -34,6 +47,7 @@ def snapshot_is_complete() -> bool:
         data_paths.PRICES_SNAPSHOT_FILE.is_file()
         and data_paths.BOUNDARIES_SNAPSHOT_FILE.is_file()
         and data_paths.CPI_SNAPSHOT_FILE.is_file()
+        and data_paths.DEMOGRAPHICS_SNAPSHOT_FILE.is_file()
         and data_paths.MANIFEST_FILE.is_file()
     )
 
@@ -82,6 +96,12 @@ def _write_cpi_snapshot(frame: pd.DataFrame, path: Path) -> int:
     return path.stat().st_size
 
 
+def _write_demographics_snapshot(frame: pd.DataFrame, path: Path) -> int:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    frame.to_csv(path, index=False, compression="gzip")
+    return path.stat().st_size
+
+
 def _write_boundaries_snapshot(collection: dict[str, Any], path: Path) -> int:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(collection, ensure_ascii=False, separators=(",", ":"))
@@ -98,6 +118,8 @@ def build_manifest(
     boundaries_bytes: int,
     cpi_rows: int = 0,
     cpi_bytes: int = 0,
+    demographics_rows: int = 0,
+    demographics_bytes: int = 0,
     fetch_date: date | None = None,
 ) -> dict[str, Any]:
     """Build manifest metadata for a snapshot directory."""
@@ -120,8 +142,19 @@ def build_manifest(
             "rows": cpi_rows,
             "source_url": CPI_API_URL,
         },
+        "demographics.csv.gz": {
+            "bytes": demographics_bytes,
+            "rows": demographics_rows,
+            "source_url": DEMOGRAPHICS_SOURCE_NOTE,
+            "paavo_tables": {
+                "population": TABLE_POPULATION,
+                "income": TABLE_INCOME,
+                "education": TABLE_EDUCATION,
+            },
+            "data_year": DEFAULT_DATA_YEAR,
+        },
     }
-    total = prices_bytes + boundaries_bytes + cpi_bytes
+    total = prices_bytes + boundaries_bytes + cpi_bytes + demographics_bytes
     return {
         "fetch_date": when.isoformat(),
         "files": files,
@@ -133,6 +166,7 @@ def write_snapshot(
     prices: pd.DataFrame,
     boundaries: dict[str, Any],
     cpi: pd.DataFrame,
+    demographics: pd.DataFrame,
     *,
     fetch_date: date | None = None,
 ) -> dict[str, Any]:
@@ -142,6 +176,9 @@ def write_snapshot(
         boundaries, data_paths.BOUNDARIES_SNAPSHOT_FILE
     )
     cpi_bytes = _write_cpi_snapshot(cpi, data_paths.CPI_SNAPSHOT_FILE)
+    demographics_bytes = _write_demographics_snapshot(
+        demographics, data_paths.DEMOGRAPHICS_SNAPSHOT_FILE
+    )
     features = boundaries.get("features") or []
     manifest = build_manifest(
         prices_rows=len(prices),
@@ -150,6 +187,8 @@ def write_snapshot(
         boundaries_bytes=boundaries_bytes,
         cpi_rows=len(cpi),
         cpi_bytes=cpi_bytes,
+        demographics_rows=len(demographics),
+        demographics_bytes=demographics_bytes,
         fetch_date=fetch_date,
     )
     data_paths.SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
@@ -166,11 +205,13 @@ def build_snapshot(*, refresh: bool = True) -> dict[str, Any]:
         prices = fetch_prices(refresh=True)
         boundaries = fetch_boundaries()
         cpi = fetch_cpi()
+        demographics = fetch_demographics()
     else:
         prices = load_prices(refresh=False)
         boundaries = load_boundaries(refresh=False)
         cpi = load_cpi(refresh=False)
-    return write_snapshot(prices, boundaries, cpi)
+        demographics = load_demographics(refresh=False)
+    return write_snapshot(prices, boundaries, cpi, demographics)
 
 
 def _format_size(num_bytes: int) -> str:
