@@ -132,6 +132,11 @@ def _snapshot_boundaries_available() -> bool:
     return data_paths.BOUNDARIES_SNAPSHOT_FILE.is_file()
 
 
+def _load_boundaries_fixture() -> dict[str, Any]:
+    with data_paths.BOUNDARIES_FIXTURE_FILE.open(encoding="utf-8") as handle:
+        return json.load(handle)
+
+
 def load_boundaries(
     *,
     refresh: bool = False,
@@ -139,6 +144,9 @@ def load_boundaries(
     fetch_geojson: Callable[[str], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Load simplified boundaries from snapshot, cache, or WFS."""
+    if data_paths.use_fixtures():
+        return _load_boundaries_fixture()
+
     if refresh:
         collection = fetch_boundaries(fetch_geojson=fetch_geojson)
         if simplify_tolerance != DEFAULT_SIMPLIFY_TOLERANCE:
@@ -234,15 +242,18 @@ def join_prices_to_areas(
         )
 
     all_codes = sorted(price_codes | boundary_codes)
+    # One dict lookup per area instead of filtering the whole price table per area.
+    price_by_code: dict[str, dict[str, Any]] = (
+        price_slice.set_index("postal_code")[
+            ["area_name", "price_per_sqm", "transactions"]
+        ].to_dict("index")
+        if not price_slice.empty
+        else {}
+    )
     rows: list[dict[str, Any]] = []
     for code in all_codes:
-        in_prices = code in price_codes
+        price_row = price_by_code.get(code)
         in_boundaries = code in boundary_codes
-        price_row = (
-            price_slice.loc[price_slice["postal_code"] == code].iloc[0]
-            if in_prices
-            else None
-        )
         area_name = ""
         if price_row is not None:
             name_val = price_row["area_name"]

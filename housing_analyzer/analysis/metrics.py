@@ -27,6 +27,16 @@ def _shift_quarter(quarter: str, quarters_back: int) -> str:
     return _quarter_from_index(_quarter_index(quarter) - quarters_back)
 
 
+def quarter_index(quarter: str) -> int:
+    """Public helper: a sortable integer for a quarter label like ``2025Q4``."""
+    return _quarter_index(quarter)
+
+
+def shift_quarter(quarter: str, quarters_back: int) -> str:
+    """Public helper: the quarter label ``quarters_back`` quarters earlier."""
+    return _shift_quarter(quarter, quarters_back)
+
+
 def _is_pre_2020(quarter: str) -> bool:
     return _quarter_index(quarter) < _quarter_index(_PRE_2020_QUARTER)
 
@@ -132,49 +142,85 @@ def reliability(
     return labels
 
 
-def rank_percentile(
+_RANK_COLUMNS = [
+    "postal_code",
+    "area_name",
+    "price_per_sqm",
+    "price_method",
+    "rank",
+    "percentile",
+]
+
+
+def _quarter_slice(
+    df: pd.DataFrame, quarter: str, building_type: str | None
+) -> pd.DataFrame:
+    subset = df.loc[df["quarter"] == quarter]
+    if building_type is not None:
+        subset = subset.loc[subset["building_type"] == building_type]
+    return subset
+
+
+def area_prices_at(
     df: pd.DataFrame,
     quarter: str,
     building_type: str | None = None,
 ) -> pd.DataFrame:
-    """Rank (1 = highest price) and percentile for one quarter across postal-code areas."""
-    subset = df.loc[df["quarter"] == quarter].copy()
+    """Price per square metre of every postal-code area for one quarter, all at once.
+
+    Same rules as the per-area code: for one building type the observed price is
+    used; without a building type the price is the transaction-weighted mean over
+    building types (simple mean when no weights exist). Returns a frame indexed by
+    ``postal_code`` with ``area_name``, ``price_per_sqm`` and ``price_method``.
+    """
+    columns = ["area_name", "price_per_sqm", "price_method"]
+    subset = _quarter_slice(df, quarter, building_type)
     if subset.empty:
-        return pd.DataFrame(
-            columns=[
-                "postal_code",
-                "area_name",
-                "price_per_sqm",
-                "price_method",
-                "rank",
-                "percentile",
-            ]
-        )
+        return pd.DataFrame(columns=columns, index=pd.Index([], name="postal_code"))
+
+    first = subset.drop_duplicates("postal_code", keep="first").set_index("postal_code")
 
     if building_type is not None:
-        subset = subset.loc[subset["building_type"] == building_type]
-
-    area_rows: list[dict[str, Any]] = []
-    for postal_code, group in subset.groupby("postal_code", sort=False):
-        area_name = group["area_name"].iloc[0]
-        if building_type is not None:
-            price = float(group["price_per_sqm"].iloc[0])
-            price_method = None if pd.isna(price) else "observed"
-        else:
-            price, price_method = _aggregate_area_price(group)
-
-        area_rows.append(
-            {
-                "postal_code": postal_code,
-                "area_name": area_name,
-                "price_per_sqm": price,
-                "price_method": price_method,
-                "rank": pd.NA,
-                "percentile": float("nan"),
-            }
+        price = first["price_per_sqm"].astype(float)
+        method = pd.Series(
+            np.where(price.isna(), None, "observed"), index=price.index, dtype=object
+        )
+    else:
+        postal = subset["postal_code"]
+        prices = subset["price_per_sqm"].astype(float)
+        tx = subset["transactions"].astype(float)
+        weight = tx.where(tx > 0)
+        usable = weight.notna() & prices.notna()
+        numerator = (prices * weight).where(usable).groupby(postal).sum(min_count=1)
+        denominator = weight.where(usable).groupby(postal).sum(min_count=1)
+        weighted = numerator / denominator
+        simple = prices.groupby(postal).mean()
+        price = weighted.fillna(simple)
+        method = pd.Series(
+            np.where(
+                weighted.notna(),
+                "weighted_mean",
+                np.where(simple.notna(), "simple_mean", None),
+            ),
+            index=weighted.index,
+            dtype=object,
         )
 
-    out = pd.DataFrame(area_rows)
+    out = pd.DataFrame(
+        {
+            "area_name": first["area_name"],
+            "price_per_sqm": price,
+            "price_method": method,
+        }
+    )
+    return out.sort_index()
+
+
+def _add_rank_percentile(out: pd.DataFrame) -> pd.DataFrame:
+    """Add ``rank`` (1 = highest price) and ``percentile`` columns to a price frame."""
+    out = out.copy()
+    out["rank"] = pd.NA
+    out["percentile"] = float("nan")
     priced = out.loc[out["price_per_sqm"].notna()].copy()
     if priced.empty:
         return out
@@ -188,7 +234,139 @@ def rank_percentile(
         priced["percentile"] = 100.0 * (1.0 - (ranked - 1.0) / (n - 1.0))
 
     out.loc[priced.index, ["rank", "percentile"]] = priced[["rank", "percentile"]]
-    return out.sort_values("postal_code", ignore_index=True)
+    return out
+
+
+def rank_percentile(
+    df: pd.DataFrame,
+    quarter: str,
+    building_type: str | None = None,
+) -> pd.DataFrame:
+    """Rank (1 = highest price) and percentile for one quarter across postal-code areas."""
+    prices = area_prices_at(df, quarter, building_type)
+    if prices.empty:
+        return pd.DataFrame(columns=_RANK_COLUMNS)
+
+    out = _add_rank_percentile(prices)
+    return out.reset_index()[_RANK_COLUMNS].sort_values("postal_code", ignore_index=True)
+
+
+def reliability_at(
+    df: pd.DataFrame,
+    quarter: str,
+    building_type: str | None = None,
+    *,
+    min_transactions: int = 10,
+    window: int = 4,
+) -> pd.Series:
+    """Reliability label per postal code at one quarter, all areas at once.
+
+    Same rules as :func:`reliability`. Without a building type the labels of the
+    building types are combined (all unknown -> unknown, any none -> none, any
+    low -> low, otherwise ok). Areas without a row at the quarter are absent.
+    """
+    if min_transactions < 1:
+        raise ValueError("min_transactions must be at least 1")
+    if window < 1:
+        raise ValueError("window must be at least 1")
+
+    subset = _quarter_slice(df, quarter, building_type)
+    if subset.empty:
+        return pd.Series(dtype=object, name="reliability")
+
+    if _is_pre_2020(quarter):
+        row_labels = pd.Series("unknown", index=subset.index, dtype=object)
+    else:
+        window_quarters = {_shift_quarter(quarter, offset) for offset in range(window)}
+        win = df.loc[df["quarter"].isin(window_quarters)]
+        if building_type is not None:
+            win = win.loc[win["building_type"] == building_type]
+        totals = (
+            win["transactions"]
+            .astype(float)
+            .groupby([win["postal_code"], win["building_type"]])
+            .sum()
+        )
+        keys = pd.MultiIndex.from_frame(subset[["postal_code", "building_type"]])
+        row_totals = totals.reindex(keys).fillna(0.0).to_numpy()
+        price_missing = subset["price_per_sqm"].isna().to_numpy()
+        row_labels = pd.Series(
+            np.where(
+                price_missing,
+                "none",
+                np.where(row_totals >= min_transactions, "ok", "low"),
+            ),
+            index=subset.index,
+            dtype=object,
+        )
+
+    postal = subset["postal_code"]
+    if building_type is not None:
+        labels = row_labels.groupby(postal).first()
+    else:
+        all_unknown = (row_labels == "unknown").groupby(postal).all()
+        any_none = (row_labels == "none").groupby(postal).any()
+        any_low = (row_labels == "low").groupby(postal).any()
+        labels = pd.Series(
+            np.where(
+                all_unknown,
+                "unknown",
+                np.where(any_none, "none", np.where(any_low, "low", "ok")),
+            ),
+            index=all_unknown.index,
+            dtype=object,
+        )
+    labels.name = "reliability"
+    return labels.sort_index()
+
+
+def summarize_areas(
+    df: pd.DataFrame,
+    quarter: str,
+    building_type: str | None = None,
+    *,
+    min_transactions: int = 10,
+    window: int = 4,
+) -> pd.DataFrame:
+    """:func:`summarize_area` for every postal-code area at once (one pass over the data).
+
+    Returns a frame indexed by ``postal_code`` with ``price_per_sqm``,
+    ``pct_change_1y``, ``pct_change_5y``, ``reliability``, ``rank``, ``percentile``
+    and ``price_method``. Areas with no row at the quarter are absent.
+    """
+    columns = [
+        "price_per_sqm",
+        "pct_change_1y",
+        "pct_change_5y",
+        "reliability",
+        "rank",
+        "percentile",
+        "price_method",
+    ]
+    current = area_prices_at(df, quarter, building_type)
+    if current.empty:
+        return pd.DataFrame(columns=columns, index=pd.Index([], name="postal_code"))
+
+    ranked = _add_rank_percentile(current)
+    now = current["price_per_sqm"]
+    out = pd.DataFrame(index=current.index)
+    out["price_per_sqm"] = now
+    for name, lag in (("pct_change_1y", 4), ("pct_change_5y", 20)):
+        prior = area_prices_at(df, _shift_quarter(quarter, lag), building_type)[
+            "price_per_sqm"
+        ].reindex(current.index)
+        out[name] = (now / prior - 1.0) * 100.0
+    out["reliability"] = reliability_at(
+        df,
+        quarter,
+        building_type,
+        min_transactions=min_transactions,
+        window=window,
+    ).reindex(current.index)
+    out["rank"] = ranked["rank"]
+    out["percentile"] = ranked["percentile"]
+    out["price_method"] = current["price_method"]
+    return out[columns]
 
 
 def regional_average(
