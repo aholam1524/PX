@@ -1,0 +1,42 @@
+name: Start factory
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  checks: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      # App repo is always PX dev. Factory code is always ASD dev.
+      # The Run workflow branch dropdown is ignored.
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+          fetch-depth: 0
+          persist-credentials: true
+          token: ${{ secrets.FACTORY_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
+      - name: Checkout ASD factory
+        uses: actions/checkout@v4
+        with:
+          repository: aholam1524/ASD
+          ref: dev
+          path: .asd-factory
+          token: ${{ secrets.FACTORY_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dispatcher
+        run: pip install -r .asd-factory/requirements.txt
+      - name: Dispatch factory
+        env:
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+          GH_TOKEN: ${{ secrets.FACTORY_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.FACTORY_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
+          FACTORY_COMMAND: start
+        run: python .asd-factory/factory/dispatch.py

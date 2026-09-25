@@ -1,3 +1,6 @@
+# Checked out by Actions from aholam1524/ASD; not part of this repo
+.asd-factory/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

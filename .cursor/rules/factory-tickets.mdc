@@ -1,0 +1,17 @@
+---
+description: File factory GitHub issues from chat instead of implementing unless asked
+alwaysApply: true
+---
+
+# Factory tickets from chat
+
+When the user describes work they want the agent factory to do (a feature, mini project, helper, tests, a ticket, "file this", "create an issue"):
+
+1. **Create a GitHub issue.** Do not implement the code unless they explicitly ask you to implement it here.
+2. Use `gh issue create` in this repo (PX). The factory code lives in ASD and is not edited from here.
+3. Body must include **What should happen** and **Done when**.
+4. Put new app code in its **own folder**. Tell the Dev agent not to change `.github/` or the ASD factory unless the user asked to change the factory wiring itself.
+5. Keep the change small enough for one PR.
+6. Reply with the issue URL only after it is created. Opening the issue queues it (`factory-queued`). Do not add labels unless a launch failed and they need a retry.
+
+If they are asking how the factory works, answering a question, or asking you to implement in this session, do not file an issue.

@@ -1,0 +1,23 @@
+name: Factory CI
+
+on:
+  pull_request:
+    branches: [dev, test, main]
+  workflow_call:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run factory CI
+        run: |
+          if [[ -z "$(find . -name 'test_*.py' -not -path './.git/*' -print -quit)" ]]; then
+            echo "No pytest files found; CI no-op pass"
+            exit 0
+          fi
+          python -m pip install pytest -q
+          python -m pytest
