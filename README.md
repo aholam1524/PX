@@ -4,7 +4,7 @@ App repo. The agent factory lives in [aholam1524/ASD](https://github.com/aholam1
 
 ## Housing price analyzer
 
-Interactive map and analysis for **Finnish housing prices** by postal-code area. The Streamlit app shows a **MapLibre choropleth** of postal-code boundaries coloured by your chosen metric (price per square metre, 1- or 5-year change, or sales in the last four quarters). Use the sidebar to pick quarter and building type; hover for details, click or search to select an area and see a short summary card. Grey areas have no published price; lighter borders and hover notes mark low-reliability estimates.
+Interactive map and analysis for **Finnish housing prices** by postal-code area. The Streamlit app shows a **MapLibre choropleth** of postal-code boundaries coloured by your chosen metric (price per square metre, 1- or 5-year change, or sales in the last four quarters). Use the sidebar to pick quarter and building type; hover for details, click or search to select an area. The **area detail panel** (beside the map) shows key figures, rank and reliability, a quarterly **trend chart** with municipality and national comparison lines (gaps where data is missing), sales volume from 2020, flagged unusual quarter-on-quarter moves, and a CSV download. Grey areas have no published price; lighter borders and hover notes mark low-reliability estimates.
 
 **Run locally** (Python 3.12):
 
@@ -33,7 +33,7 @@ Deploy on [Streamlit Community Cloud](https://docs.streamlit.io/deploy/streamlit
 
 Two apps (one on `dev`, one on `main`) are a practical setup: preview changes on `dev` before the snapshot and code reach `main`. For limits, billing, and platform behavior, see Streamlit’s [Community Cloud documentation](https://docs.streamlit.io/deploy/streamlit-community-cloud).
 
-- **`housing_analyzer/`** — data, analysis, and map figure helpers (`housing_analyzer/map.py`)
+- **`housing_analyzer/`** — data, analysis, map helpers (`housing_analyzer/map.py`), and area detail panel logic (`housing_analyzer/panel.py`)
 - **`app/streamlit_app.py`** — Streamlit UI
 - **`tests/`** — pytest; fixtures under `tests/fixtures/` for offline runs
 
