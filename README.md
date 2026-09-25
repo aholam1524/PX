@@ -75,7 +75,7 @@ You describe work in Cursor
    | `factory-conflict` | Conflict agent on the `dev`→`test` PR |
    | `factory-waiting-main` | `dev`→`test` promotion complete; you merge `test`→`main` to `main` |
    | `factory-done` | Work merged to `main` |
-   | `factory-blocked` | Test failed again after Fixer; use `agent-fix` / `agent-test` to retry |
+   | `factory-blocked` | Test failed again after Fixer, or Claude review/fix/merge failed; retry with `agent-fix` / `agent-test` or `agent-review` on the PR |
 
    Each ticket keeps **one** `factory-*` status label at a time (retry labels stay separate).
 
@@ -107,7 +107,7 @@ Watch SDK-launched agents (Dev, Test, Fixer, Conflict) in Cursor: Agents → Fil
 
 ## Usage reporting
 
-When **Claude review** runs on a feature PR (`agent-review`), the workflow posts **one** PR comment (updated after each job) with a table of **review**, **fix**, and **merge** job usage: Claude turns, input/output/cache token counts, an **API-equivalent cost estimate**, Linux runner minutes (billed, rounded up), and estimated Linux cost. The same table is written to each job’s GitHub Actions step summary.
+When **Claude review** runs on a feature PR (`agent-review`), the workflow posts **one** PR comment (updated after each job) with a table of **review**, **fix**, and **merge** job usage: Claude turns, input/output/cache token counts, an **API-equivalent cost estimate**, Linux runner minutes (billed, rounded up), and estimated Linux cost. The same table is written to each job’s GitHub Actions step summary. If any of those jobs fails, it also posts **one** comment per workflow run (with a run id marker) listing the failed jobs and linking to the Actions run, and sets the linked issue (`Closes #N` in the PR body) to `factory-blocked` unless it is already `factory-done`. Re-add `agent-review` to retry.
 
 Token cost in that comment is **not** what you pay: review and fix use your Claude subscription (`CLAUDE_CODE_OAUTH_TOKEN`), so the dollar figure is only an API-equivalent estimate. On this **public** repo, hosted Linux runner minutes are **free** (`billed: $0.00`); the comment still shows what Actions would cost on a private repo. Override the per-minute rate with the repository variable `ACTIONS_LINUX_RATE_PER_MIN` (default `0.006`).
 

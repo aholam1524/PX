@@ -268,3 +268,84 @@ jobs:
           REPO_PRIVATE: ${{ github.event.repository.private }}
         run: python3 .github/scripts/usage_report.py --job merge
 
+  notify-failure:
+    needs: [review, fix, merge]
+    if: >
+      always() &&
+      contains(needs.*.result, 'failure') &&
+      github.event.action == 'labeled' &&
+      github.event.label.name == 'agent-review' &&
+      github.event.pull_request.base.ref == 'dev'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      issues: write
+    env:
+      GH_TOKEN: ${{ secrets.FACTORY_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+    steps:
+      - name: Post failure comment on PR
+        continue-on-error: true
+        env:
+          RUN_ID: ${{ github.run_id }}
+          SERVER_URL: ${{ github.server_url }}
+          REPOSITORY: ${{ github.repository }}
+          NEEDS_REVIEW: ${{ needs.review.result }}
+          NEEDS_FIX: ${{ needs.fix.result }}
+          NEEDS_MERGE: ${{ needs.merge.result }}
+        run: |
+          set -euo pipefail
+          MARKER="<!-- factory:claude-failure:${RUN_ID} -->"
+          COMMENTS="$(gh pr view "$PR_NUMBER" --json comments --jq '.comments[].body')"
+          if grep -Fq "$MARKER" <<< "$COMMENTS"; then
+            echo "Failure comment already posted for this run; skipping."
+            exit 0
+          fi
+
+          FAILED_JOBS=()
+          [[ "$NEEDS_REVIEW" == "failure" ]] && FAILED_JOBS+=("review")
+          [[ "$NEEDS_FIX" == "failure" ]] && FAILED_JOBS+=("fix")
+          [[ "$NEEDS_MERGE" == "failure" ]] && FAILED_JOBS+=("merge")
+          FAILED_LIST="$(IFS=', '; echo "${FAILED_JOBS[*]}")"
+          RUN_URL="${SERVER_URL}/${REPOSITORY}/actions/runs/${RUN_ID}"
+
+          BODY="$(printf '%s\n\nFactory: the **Claude review** workflow failed.\n\nFailed jobs: %s\nRun: %s\n\nThe owner needs to look at the failure. Add the agent-review label again to retry (the fix-once marker still applies).' "$MARKER" "$FAILED_LIST" "$RUN_URL")"
+          gh pr comment "$PR_NUMBER" --body "$BODY"
+
+      - name: Mark linked issue factory-blocked
+        continue-on-error: true
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          ISSUE_NUM="$(printf '%s\n' "$PR_BODY" | grep -Eio 'closes #[0-9]+' | grep -Eo '[0-9]+' | head -1 || true)"
+          if [[ -z "$ISSUE_NUM" ]]; then
+            echo "No Closes #N in PR body; skipping issue label update."
+            exit 0
+          fi
+
+          LABELS="$(gh issue view "$ISSUE_NUM" --json labels --jq '.labels[].name')"
+          if grep -Fxq 'factory-done' <<< "$LABELS"; then
+            echo "Issue #${ISSUE_NUM} is factory-done; skipping label update."
+            exit 0
+          fi
+
+          FACTORY_STATUS=(
+            factory-queued
+            factory-dev
+            factory-review
+            factory-waiting-dev
+            factory-test
+            factory-fixer
+            factory-conflict
+            factory-waiting-main
+            factory-done
+            factory-blocked
+          )
+          for label in "${FACTORY_STATUS[@]}"; do
+            if [[ "$label" != "factory-blocked" ]] && grep -Fxq "$label" <<< "$LABELS"; then
+              gh issue edit "$ISSUE_NUM" --remove-label "$label"
+            fi
+          done
+          gh issue edit "$ISSUE_NUM" --add-label factory-blocked
+
