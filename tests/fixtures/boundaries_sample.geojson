@@ -6,6 +6,8 @@
       "properties": {
         "posti_alue": "00100",
         "postal_code": "00100",
+        "kunta": "091",
+        "kuntanro": 91,
         "nimi": "Helsinki keskusta",
         "vuosi": 2022
       },
@@ -27,6 +29,8 @@
       "properties": {
         "posti_alue": "01200",
         "postal_code": "01200",
+        "kunta": "092",
+        "kuntanro": 92,
         "nimi": "Vantaa Hakunila",
         "vuosi": 2022
       },
