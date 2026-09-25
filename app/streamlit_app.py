@@ -21,6 +21,21 @@ from housing_analyzer.map import (
     resolve_building_type_label,
     search_area_matches,
 )
+from housing_analyzer.panel import (
+    area_detail_export_frame,
+    area_display_name,
+    build_sales_volume_figure,
+    build_trend_chart_data,
+    build_trend_figure,
+    building_type_panel_options,
+    flag_unusual_quarter_changes,
+    municipality_name_from_prices,
+    quarterly_area_prices,
+    quarterly_transaction_counts,
+    reliability_explanation,
+    resolve_panel_building_type,
+    trailing_sales_count,
+)
 
 st.set_page_config(page_title="Housing price analyzer", layout="wide")
 
@@ -64,43 +79,137 @@ def _friendly_load_error(exc: BaseException) -> str:
     return f"Could not load housing data: {exc}"
 
 
-def _render_summary_card(
-    prices,
+def _format_building_type_display(
+    prices: pd.DataFrame, building_type_code: str | None
+) -> str:
+    if building_type_code in (None, "all"):
+        return "All building types"
+    label = resolve_building_type_label(prices, building_type_code)
+    return label or dict(BUILDING_TYPE_CHOICES).get(building_type_code, building_type_code)
+
+
+def _render_detail_panel(
+    prices: pd.DataFrame,
+    boundaries: dict,
     postal_code: str,
     quarter: str,
-    building_type_code: str | None,
+    map_building_type_code: str | None,
 ) -> None:
-    bt_label = resolve_building_type_label(prices, building_type_code)
-    summary = summarize_area(
-        prices,
-        postal_code,
-        quarter,
-        building_type=bt_label,
+    code = str(postal_code).zfill(5)
+    st.subheader("Area detail")
+
+    bt_options = [c for c, _ in building_type_panel_options()]
+    default_bt = (
+        map_building_type_code
+        if map_building_type_code in bt_options
+        else "all"
     )
-    st.subheader(f"{summary['postal_code']} — selected area")
-    col1, col2, col3 = st.columns(3)
+    panel_bt_code = st.selectbox(
+        "Building type (detail panel)",
+        options=bt_options,
+        format_func=lambda c: dict(building_type_panel_options())[c],
+        index=bt_options.index(default_bt),
+        key=f"panel_bt_{code}",
+    )
+    panel_bt_label = resolve_panel_building_type(prices, panel_bt_code)
+    index_mode = st.checkbox("Index to 100 at the start", key=f"panel_index_{code}")
+
+    summary = summarize_area(prices, code, quarter, building_type=panel_bt_label)
+    area_name = area_display_name(prices, code) or "—"
+    municipality = municipality_name_from_prices(prices, code)
+    bt_display = _format_building_type_display(prices, panel_bt_code)
+
+    header_bits = [f"**{code}**", area_name]
+    if municipality:
+        header_bits.append(f"({municipality})")
+    st.markdown(" · ".join(header_bits))
+    st.caption(f"Quarter **{quarter}** · {bt_display}")
+
+    sales_4q = trailing_sales_count(prices, code, quarter, panel_bt_code)
+    rel_text = reliability_explanation(summary.get("reliability"), sales_4q)
+
+    c1, c2, c3 = st.columns(3)
     price = summary["price_per_sqm"]
-    col1.metric(
+    c1.metric(
         "Price per m²",
         f"{price:,.0f} EUR/m²" if price == price else "No data",
     )
     yoy = summary["pct_change_1y"]
-    col2.metric(
+    c2.metric(
         "1-year change",
         f"{yoy:+.1f}%" if yoy == yoy else "—",
     )
     five = summary["pct_change_5y"]
-    col3.metric(
+    c3.metric(
         "5-year change",
         f"{five:+.1f}%" if five == five else "—",
     )
-    rel = summary.get("reliability")
+
+    c4, c5, c6 = st.columns(3)
+    c4.metric(
+        "Sales (last 4 quarters)",
+        str(int(round(sales_4q))) if sales_4q == sales_4q else "—",
+    )
     rank = summary.get("rank")
     pct = summary.get("percentile")
-    rank_text = ""
-    if pd.notna(rank) and pct == pct:
-        rank_text = f" · Rank {int(rank)} · {pct:.0f}th percentile"
-    st.caption(f"Reliability: {rel or 'unknown'}{rank_text}")
+    c5.metric(
+        "Rank among areas",
+        str(int(rank)) if pd.notna(rank) else "—",
+    )
+    c6.metric(
+        "Percentile",
+        f"{pct:.0f}th" if pct == pct else "—",
+    )
+    st.caption(rel_text)
+
+    trend_data = build_trend_chart_data(
+        prices,
+        boundaries,
+        code,
+        panel_bt_label,
+        index_to_100=index_mode,
+    )
+    trend_fig = build_trend_figure(trend_data, area_label=f"{code} {area_name}".strip())
+    st.plotly_chart(trend_fig, use_container_width=True, key=f"trend_{code}")
+
+    if not trend_data.municipality_available:
+        st.caption(
+            "Municipality comparison line is not shown because municipality metadata "
+            "is missing from the boundary data for this area."
+        )
+
+    area_series = quarterly_area_prices(prices, code, panel_bt_label)
+    unusual = flag_unusual_quarter_changes(area_series)
+    if unusual:
+        st.markdown("**Unusual quarter-on-quarter movements**")
+        for item in unusual:
+            st.write(
+                f"- **{item['quarter']}**: {item['pct_change_qoq']:+.1f}% change "
+                f"(typical spread ±{item['std_qoq'] * 3:.1f}% for this area)"
+            )
+        st.caption(
+            "Small sample sizes can produce sharp spikes; treat flagged quarters with caution."
+        )
+
+    sales_counts = quarterly_transaction_counts(prices, code, panel_bt_label)
+    if not sales_counts.empty:
+        st.plotly_chart(
+            build_sales_volume_figure(sales_counts),
+            use_container_width=True,
+            key=f"sales_{code}",
+        )
+        st.caption(
+            "Transaction counts are shown from 2020 onward, when public counts are available."
+        )
+
+    export_df = area_detail_export_frame(prices, code, panel_bt_label)
+    st.download_button(
+        "Download area data (CSV)",
+        data=export_df.to_csv(index=False),
+        file_name=f"housing_{code}.csv",
+        mime="text/csv",
+        key=f"download_{code}",
+    )
 
 
 try:
@@ -161,38 +270,50 @@ with st.expander("How to read the map"):
 if "selected_postal_code" not in st.session_state:
     st.session_state.selected_postal_code = None
 
-search_query = st.text_input(
-    "Search by postal code or area name",
-    placeholder="e.g. 00100 or Punavuori",
-)
+map_col, detail_col = st.columns([3, 2])
 
-selection = st.plotly_chart(
-    fig,
-    use_container_width=True,
-    on_select="rerun",
-    key="housing_map",
-)
-
-clicked_code = postal_code_from_selection(selection)
-
-search_hits = search_area_matches(map_df, search_query)
-if search_hits:
-    picked = st.selectbox(
-        "Matching areas",
-        options=search_hits,
-        format_func=lambda c: f"{c} — {map_df.loc[map_df['postal_code']==c, 'area_name'].iloc[0]}",
+with map_col:
+    search_query = st.text_input(
+        "Search by postal code or area name",
+        placeholder="e.g. 00100 or Punavuori",
     )
-    if st.button("Show selected area summary"):
-        st.session_state.selected_postal_code = picked
-elif search_query.strip():
-    st.caption("No areas match your search.")
 
-if clicked_code:
-    st.session_state.selected_postal_code = clicked_code
+    selection = st.plotly_chart(
+        fig,
+        use_container_width=True,
+        on_select="rerun",
+        key="housing_map",
+    )
 
-selected = st.session_state.selected_postal_code
-if selected:
-    _render_summary_card(prices, selected, quarter, building_type_code)
+    clicked_code = postal_code_from_selection(selection)
+
+    search_hits = search_area_matches(map_df, search_query)
+    if search_hits:
+        picked = st.selectbox(
+            "Matching areas",
+            options=search_hits,
+            format_func=lambda c: f"{c} — {map_df.loc[map_df['postal_code']==c, 'area_name'].iloc[0]}",
+        )
+        if st.button("Show selected area"):
+            st.session_state.selected_postal_code = picked
+    elif search_query.strip():
+        st.caption("No areas match your search.")
+
+    if clicked_code:
+        st.session_state.selected_postal_code = clicked_code
+
+with detail_col:
+    selected = st.session_state.selected_postal_code
+    if selected:
+        _render_detail_panel(
+            prices,
+            boundaries,
+            selected,
+            quarter,
+            building_type_code,
+        )
+    else:
+        st.info("Click a map area or search and choose **Show selected area** to open the detail panel.")
 
 st.divider()
 footer_parts = [
