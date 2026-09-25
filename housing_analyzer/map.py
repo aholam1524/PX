@@ -46,6 +46,7 @@ PROVISIONAL_COVERAGE_RATIO = 0.85
 PRIOR_QUARTERS_FOR_COVERAGE = 8
 DEFAULT_COLOR_PERCENTILE_LOW = 2.0
 DEFAULT_COLOR_PERCENTILE_HIGH = 98.0
+PRICE_COLOR_RANGE = (0.0, 4000.0)
 BUDGET_FIT_COLOR_WITHIN = "#2e7d32"
 BUDGET_FIT_COLOR_STRETCH = "#f9a825"
 BUDGET_FIT_COLOR_OVER = "#c62828"
@@ -306,6 +307,8 @@ def metric_color_range(
     percentile_high: float = DEFAULT_COLOR_PERCENTILE_HIGH,
     use_full_range: bool = False,
 ) -> tuple[float, float]:
+    if metric == METRIC_PRICE and not use_full_range:
+        return PRICE_COLOR_RANGE
     valid = values.dropna()
     if valid.empty:
         return 0.0, 1.0
@@ -640,7 +643,11 @@ def value_colorbar(metric: str, title: str, zmin: float, zmax: float) -> dict[st
         "len": 0.78,
         "yanchor": "bottom",
     }
-    if metric in _PCT_CHANGE_METRICS and zmin < 0 < zmax:
+    if metric == METRIC_PRICE and (zmin, zmax) == PRICE_COLOR_RANGE:
+        colorbar["tickmode"] = "array"
+        colorbar["tickvals"] = [0.0, 1000.0, 2000.0, 3000.0, 4000.0]
+        colorbar["ticktext"] = ["0", "1000", "2000", "3000", "4000+"]
+    elif metric in _PCT_CHANGE_METRICS and zmin < 0 < zmax:
         colorbar["tickmode"] = "array"
         colorbar["tickvals"] = [zmin, 0.0, zmax]
     return colorbar
