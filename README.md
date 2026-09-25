@@ -1,6 +1,6 @@
 # PX
 
-App repo. The agent factory lives in [aholam1524/ASD](https://github.com/aholam1524/ASD) (`dev`). Actions in this repo check that code out to `.asd-factory/` and run it against PX.
+App repo. The agent factory lives in [aholam1524/ASD](https://github.com/aholam1524/ASD) (`main`). Actions in this repo check that code out to `.asd-factory/` and run it against PX.
 
 Describe the work in Cursor chat in this repo. The agent files a GitHub issue; that **queues** the work (label `factory-queued`). You run **Start factory** in Actions to begin Dev on the oldest queued issue. Code moves `feature/N-slug` → `dev` → `test` → `main`. You merge into `dev` and `main`. Merge into `test` is automatic when the Test agent reports PASS and CI is green.
 
@@ -86,7 +86,7 @@ You do not approve workflow runs. You only merge PRs into `dev` after Review, an
 ## How to start
 
 1. Open [Start factory](https://github.com/aholam1524/PX/actions/workflows/start-factory.yml) in GitHub Actions.
-2. Click **Run workflow** (no inputs). The branch dropdown does not matter. Start factory always checks out this repo's `dev` and factory code from ASD `dev`.
+2. Click **Run workflow** (no inputs). The branch dropdown does not matter. Start factory always checks out this repo's `dev` and factory code from ASD `main`.
 
 That starts Dev on the oldest open issue with the `factory-queued` label. If the queue is empty, the run succeeds and does nothing. If a `feature/*` → `dev` PR is already open, Dev is not started until that PR is merged (or add `agent-dev` on a specific issue to retry that issue only).
 
