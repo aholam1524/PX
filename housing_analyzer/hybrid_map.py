@@ -41,12 +41,17 @@ from housing_analyzer.map import (
     MISSING_COLOR,
     MISSING_OUTLINE_COLOR,
     MISSING_OUTLINE_WIDTH,
+    NO_DATA_FILL,
+    VALUE_COLORSCALE,
+    MAP_LAYOUT_MARGINS,
     _PCT_CHANGE_METRICS,
     _REAL_CHANGE_METRICS,
     _budget_ratio_and_category,
     _feature_subset,
+    _reliability_outlines,
     _solid_colorscale,
     build_choropleth_figure,
+    value_colorbar,
     format_metric_value,
     metric_color_range,
     metric_is_missing,
@@ -602,7 +607,7 @@ def build_hybrid_choropleth_figure(
                 locations=mun_with["municipality_code"],
                 z=mun_with[metric],
                 featureidkey="properties.municipality_code",
-                colorscale="Viridis",
+                colorscale=VALUE_COLORSCALE,
                 zmin=zmin,
                 zmax=zmax,
                 marker={
@@ -617,26 +622,19 @@ def build_hybrid_choropleth_figure(
         )
 
     if not with_data.empty:
-        low = with_data["reliability"] == "low"
-        line_width = np.where(low, 2.0, 0.5)
-        line_color = np.where(low, "#616161", "white")
+        outlines = _reliability_outlines(with_data["reliability"])
         fig.add_trace(
             go.Choroplethmap(
                 geojson=_feature_subset(postal_boundaries, with_data["postal_code"]),
                 locations=with_data["postal_code"],
                 z=with_data[metric],
                 featureidkey="properties.postal_code",
-                colorscale="Viridis",
+                colorscale=VALUE_COLORSCALE,
                 zmin=zmin,
                 zmax=zmax,
-                marker={
-                    "line": {
-                        "width": line_width.tolist(),
-                        "color": line_color.tolist(),
-                    }
-                },
+                marker={"line": outlines},
                 showscale=True,
-                colorbar={"title": color_label},
+                colorbar=value_colorbar(metric, color_label, zmin, zmax),
                 customdata=_add_postal_customdata(with_data, "postal"),
                 hovertext=with_data["hover"],
                 hoverinfo="text",
@@ -675,7 +673,7 @@ def build_hybrid_choropleth_figure(
                 locations=missing["postal_code"],
                 z=[0.0] * len(missing),
                 featureidkey="properties.postal_code",
-                colorscale=_solid_colorscale(MISSING_COLOR),
+                colorscale=_solid_colorscale(NO_DATA_FILL),
                 zmin=0,
                 zmax=1,
                 showscale=False,
@@ -694,7 +692,7 @@ def build_hybrid_choropleth_figure(
 
     fig.update_layout(
         map_style="carto-positron",
-        margin={"l": 0, "r": 0, "t": 0, "b": 0},
+        margin=MAP_LAYOUT_MARGINS,
         legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "x": 0},
     )
     return fig
