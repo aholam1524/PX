@@ -14,8 +14,10 @@ from housing_analyzer.analysis.metrics import (
     summarize_areas,
     to_real,
 )
+from housing_analyzer.analysis.relationships import price_to_income_ratio
 from housing_analyzer.data.boundaries import join_prices_to_areas
 from housing_analyzer.data.cpi import cpi_by_quarter, load_cpi
+from housing_analyzer.data.demographics import load_demographics
 
 MISSING_COLOR = "#bdbdbd"
 METRIC_PRICE = "price_per_sqm"
@@ -24,6 +26,7 @@ METRIC_CHANGE_5Y = "pct_change_5y"
 METRIC_CHANGE_1Y_REAL = "pct_change_1y_real"
 METRIC_CHANGE_5Y_REAL = "pct_change_5y_real"
 METRIC_SALES = "sales_4q"
+METRIC_PRICE_TO_INCOME = "price_to_income"
 
 METRIC_CHOICES: tuple[tuple[str, str], ...] = (
     (METRIC_PRICE, "Price per square metre"),
@@ -32,6 +35,7 @@ METRIC_CHOICES: tuple[tuple[str, str], ...] = (
     (METRIC_CHANGE_1Y_REAL, "1-year change (real)"),
     (METRIC_CHANGE_5Y_REAL, "5-year change (real)"),
     (METRIC_SALES, "Number of sales (last 4 quarters)"),
+    (METRIC_PRICE_TO_INCOME, "Price-to-income ratio (rough)"),
 )
 
 BUILDING_TYPE_CHOICES: tuple[tuple[str, str], ...] = (
@@ -49,6 +53,7 @@ METRIC_UNITS: dict[str, str] = {
     METRIC_CHANGE_1Y_REAL: "%",
     METRIC_CHANGE_5Y_REAL: "%",
     METRIC_SALES: "sales",
+    METRIC_PRICE_TO_INCOME: "m² per EUR income",
 }
 
 _PCT_CHANGE_METRICS = frozenset(
@@ -187,6 +192,8 @@ def format_metric_value(value: float, metric: str) -> str:
         return f"{sign}{value:.1f} {unit}"
     if metric == METRIC_SALES:
         return f"{int(round(value))} {unit}"
+    if metric == METRIC_PRICE_TO_INCOME:
+        return f"{value:.2f} {unit}"
     return f"{value} {unit}"
 
 
@@ -245,6 +252,7 @@ def prepare_map_dataframe(
     metric: str,
     *,
     cpi_df: pd.DataFrame | None = None,
+    demographics_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Join boundaries to metrics for one quarter, building type, and map layer.
 
@@ -270,11 +278,24 @@ def prepare_map_dataframe(
     ).reindex(codes)
     sales = trailing_sales_by_area(prices_df, quarter, code).reindex(codes)
 
+    demo = demographics_df if demographics_df is not None else load_demographics()
+    demo_index = demo.set_index(demo["postal_code"].astype(str).str.zfill(5))
+    median_income = demo_index.reindex(codes)["median_income_eur"].to_numpy(dtype=float)
+    price_vals = summaries["price_per_sqm"].to_numpy(dtype=float)
+    price_to_income = np.array(
+        [
+            price_to_income_ratio(float(p), float(i))
+            for p, i in zip(price_vals, median_income, strict=True)
+        ],
+        dtype=float,
+    )
+
     enriched = pd.DataFrame(
         {
             "postal_code": codes.to_numpy(),
             "area_name": frame["area_name"].to_numpy(),
-            "price_per_sqm": summaries["price_per_sqm"].to_numpy(dtype=float),
+            "price_per_sqm": price_vals,
+            "price_to_income": price_to_income,
             "pct_change_1y": summaries["pct_change_1y"].to_numpy(dtype=float),
             "pct_change_5y": summaries["pct_change_5y"].to_numpy(dtype=float),
             "pct_change_1y_real": summaries["pct_change_1y_real"].to_numpy(dtype=float),

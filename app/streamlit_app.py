@@ -14,8 +14,19 @@ from housing_analyzer.analysis.compare import (
     summaries_for_compare,
 )
 from housing_analyzer.analysis.metrics import summarize_area
+from housing_analyzer.analysis.relationships import (
+    CORRELATION_DISCLAIMER,
+    build_relationships_summary,
+)
 from housing_analyzer.analysis.similar_areas import similar_areas, similar_areas_explanation
-from housing_analyzer.data import load_boundaries, load_cpi, load_manifest, load_prices
+from housing_analyzer.data import (
+    load_boundaries,
+    load_cpi,
+    load_demographics,
+    load_manifest,
+    load_prices,
+)
+from housing_analyzer.data.demographics import attach_demographics_to_summaries
 from housing_analyzer.data.cpi import cpi_by_quarter
 from housing_analyzer.data.paths import use_fixtures
 from housing_analyzer.data.snapshot import snapshot_is_complete
@@ -55,7 +66,7 @@ st.set_page_config(page_title="Housing price analyzer", layout="wide")
 st.title("Housing price analyzer")
 st.write(
     "Explore Finnish postal-code areas on a map coloured by housing price metrics, "
-    "with trends and comparisons for a selected area."
+    "with trends and comparisons for a selected area, and cross-area relationship charts."
 )
 st.caption("For information only — not investment advice.")
 
@@ -78,16 +89,25 @@ def _load_housing_data() -> tuple:
     prices = load_prices()
     boundaries = load_boundaries()
     cpi = load_cpi()
+    demographics = load_demographics()
     manifest = load_manifest()
-    return prices, boundaries, cpi, manifest
+    return prices, boundaries, cpi, demographics, manifest
 
 
 @st.cache_data(show_spinner=False)
-def _cached_map_frame(_prices, _boundaries, _cpi, quarter, building_type_code, metric):
+def _cached_map_frame(
+    _prices, _boundaries, _cpi, _demographics, quarter, building_type_code, metric
+):
     """Map table for one selection. The large inputs are not hashed (leading underscore);
     the selection values are the cache key, so clicking the map does not recompute it."""
     return prepare_map_dataframe(
-        _prices, _boundaries, quarter, building_type_code, metric, cpi_df=_cpi
+        _prices,
+        _boundaries,
+        quarter,
+        building_type_code,
+        metric,
+        cpi_df=_cpi,
+        demographics_df=_demographics,
     )
 
 
@@ -159,11 +179,42 @@ def _format_compare_option(catalog: pd.DataFrame, code: str) -> str:
     return f"{code} — {name}".strip(" —")
 
 
+def _render_relationships_tab(
+    prices: pd.DataFrame,
+    quarter: str,
+    building_type_code: str | None,
+    cpi: pd.DataFrame,
+    demographics: pd.DataFrame,
+) -> None:
+    st.subheader("Relationships")
+    st.caption(
+        f"Quarter **{quarter}** · {_format_building_type_display(prices, building_type_code)}"
+    )
+    bt_label = resolve_building_type_label(prices, building_type_code)
+    cpi_quarterly = cpi_by_quarter(cpi)
+    summaries = attach_demographics_to_summaries(
+        summaries_for_compare(
+            prices, quarter, bt_label, cpi_quarterly=cpi_quarterly
+        ),
+        demographics,
+    )
+    summary = build_relationships_summary(summaries, demographics)
+    st.write(
+        f"**{len(summary.included)}** areas with reliable prices and complete demographics. "
+        f"**{summary.excluded_count}** areas excluded (unreliable price, missing demographics, "
+        "or postal codes only in prices or Paavo)."
+    )
+    st.caption(CORRELATION_DISCLAIMER)
+    for plot in summary.plots:
+        st.plotly_chart(plot.figure, use_container_width=True, key=f"rel_{plot.spec.key}")
+
+
 def _render_compare_tab(
     prices: pd.DataFrame,
     quarter: str,
     building_type_code: str | None,
     cpi: pd.DataFrame,
+    demographics: pd.DataFrame,
 ) -> None:
     _init_compare_session_state()
     catalog = area_catalog(prices)
@@ -203,8 +254,11 @@ def _render_compare_tab(
         return
 
     cpi_quarterly = cpi_by_quarter(cpi)
-    summaries = summaries_for_compare(
-        prices, quarter, bt_label, cpi_quarterly=cpi_quarterly
+    summaries = attach_demographics_to_summaries(
+        summaries_for_compare(
+            prices, quarter, bt_label, cpi_quarterly=cpi_quarterly
+        ),
+        demographics,
     )
     sales = trailing_sales_by_area(prices, quarter, building_type_code)
     include_real = "pct_change_1y_real" in summaries.columns
@@ -413,7 +467,7 @@ def _render_detail_panel(
 
 try:
     with st.spinner("Loading housing prices and map boundaries…"):
-        prices, boundaries, cpi, manifest = _load_housing_data()
+        prices, boundaries, cpi, demographics, manifest = _load_housing_data()
 except Exception as exc:  # noqa: BLE001 — show reason in UI
     st.error(_friendly_load_error(exc))
     st.stop()
@@ -452,10 +506,12 @@ if manifest:
 
 _init_compare_session_state()
 
-map_tab, compare_tab = st.tabs(["Map", "Compare"])
+map_tab, compare_tab, relationships_tab = st.tabs(["Map", "Compare", "Relationships"])
 
 with map_tab:
-    map_df = _cached_map_frame(prices, boundaries, cpi, quarter, building_type_code, metric)
+    map_df = _cached_map_frame(
+        prices, boundaries, cpi, demographics, quarter, building_type_code, metric
+    )
     fig = build_choropleth_figure(map_df, boundaries, metric)
 
     if boundary_edition:
@@ -523,12 +579,18 @@ with map_tab:
             )
 
 with compare_tab:
-    _render_compare_tab(prices, quarter, building_type_code, cpi)
+    _render_compare_tab(prices, quarter, building_type_code, cpi, demographics)
+
+with relationships_tab:
+    _render_relationships_tab(
+        prices, quarter, building_type_code, cpi, demographics
+    )
 
 st.divider()
 footer_parts = [
     "Data: Statistics Finland — "
-    "[Prices per square metre by postal code (PxWeb)](https://pxdata.stat.fi/PxWeb/api/v1/en/StatFin/ashi/13mt.px) "
+    "[Prices per square metre by postal code (PxWeb)](https://pxdata.stat.fi/PxWeb/api/v1/en/StatFin/ashi/13mt.px), "
+    "[Paavo open data by postal code](https://pxdata.stat.fi/PxWeb/api/v1/en/Postinumeroalueittainen_avoin_tieto/), "
     "and [postal-code boundaries (WFS)](https://geo.stat.fi/geoserver/postialue/wfs)."
 ]
 if manifest and manifest.get("fetch_date"):
