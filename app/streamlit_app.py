@@ -53,14 +53,18 @@ from housing_analyzer.map import (
     METRIC_FITS_BUDGET,
     METRIC_PRICE,
     build_choropleth_figure,
-    latest_quarter_with_data,
+    count_areas_with_published_price,
+    default_map_quarter,
     list_quarters,
+    metric_color_range,
     postal_code_from_selection,
     prepare_budget_fit_dataframe,
     prepare_map_dataframe,
+    quarter_meets_coverage_threshold,
     resolve_building_type_label,
     search_area_matches,
     trailing_sales_by_area,
+    typical_quarter_price_coverage,
 )
 from housing_analyzer.panel import (
     area_detail_export_frame,
@@ -704,11 +708,16 @@ if prices.empty or not (boundaries.get("features")):
 with st.sidebar:
     st.header("Map controls")
     quarters = list_quarters(prices)
-    default_quarter = latest_quarter_with_data(prices) or quarters[-1]
+    default_quarter = default_map_quarter(prices) or quarters[-1]
     quarter = st.selectbox(
         "Quarter",
         options=quarters,
         index=quarters.index(default_quarter) if default_quarter in quarters else len(quarters) - 1,
+        help=(
+            "Defaults to the latest quarter with enough published prices across all "
+            "building types. A specific building type may still show as provisional "
+            "for this quarter if its own coverage is low."
+        ),
     )
     building_type_code = st.selectbox(
         "Building type",
@@ -721,6 +730,11 @@ with st.sidebar:
         options=[key for key, _ in METRIC_CHOICES],
         format_func=lambda k: dict(METRIC_CHOICES)[k],
         index=0,
+    )
+    use_full_color_range = st.checkbox(
+        "Use the full value range",
+        value=False,
+        help="When off, the colour scale uses the 2nd–98th percentile so outliers do not wash out the map.",
     )
     afford_inputs = _affordability_sidebar_inputs()
 
@@ -750,7 +764,16 @@ with map_tab:
         afford_inputs["size_sqm"],
         max_affordable_price,
     )
-    fig = build_choropleth_figure(map_df, boundaries, metric)
+    color_range = None
+    if metric != METRIC_FITS_BUDGET and not map_df.empty:
+        color_range = metric_color_range(
+            map_df.loc[~map_df["missing"], metric],
+            metric,
+            use_full_range=use_full_color_range,
+        )
+    fig = build_choropleth_figure(
+        map_df, boundaries, metric, color_range=color_range
+    )
 
     if boundary_edition:
         st.caption(f"Map boundaries: {boundary_edition} (Statistics Finland).")
@@ -795,6 +818,34 @@ with map_tab:
             on_select="rerun",
             key="housing_map",
         )
+
+        if not map_df.empty:
+            areas_with_metric = int((~map_df["missing"]).sum())
+            total_areas = len(map_df)
+            st.caption(
+                f"{areas_with_metric} of {total_areas} areas have a published price for this "
+                "selection. Statistics Finland publishes prices only for areas with enough "
+                "sales; the rest are shown in grey and are never treated as zero."
+            )
+            if metric != METRIC_FITS_BUDGET and not use_full_color_range:
+                st.caption(
+                    "Colour scale covers the 2nd to 98th percentile; more extreme areas "
+                    "use the end colours."
+                )
+            typical_coverage = typical_quarter_price_coverage(
+                prices, quarter, building_type_code
+            )
+            if typical_coverage is not None and not quarter_meets_coverage_threshold(
+                prices, quarter, building_type_code, typical=typical_coverage
+            ):
+                price_areas = count_areas_with_published_price(
+                    prices, quarter, building_type_code
+                )
+                typical_rounded = int(round(typical_coverage))
+                st.caption(
+                    f"{quarter} is provisional: only {price_areas} areas have a published "
+                    f"price (typically about {typical_rounded})."
+                )
 
         clicked_code = postal_code_from_selection(selection)
 
