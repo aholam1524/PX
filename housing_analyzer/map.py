@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any, Mapping
 
 import numpy as np
@@ -18,8 +19,19 @@ from housing_analyzer.analysis.relationships import price_to_income_ratio
 from housing_analyzer.data.boundaries import join_prices_to_areas
 from housing_analyzer.data.cpi import cpi_by_quarter, load_cpi
 from housing_analyzer.data.demographics import load_demographics
+from housing_analyzer.affordability import (
+    BUDGET_FIT_OVER,
+    BUDGET_FIT_STRETCH,
+    BUDGET_FIT_WITHIN,
+    classify_budget_fit_ratio,
+    price_to_budget_ratio,
+    typical_dwelling_price,
+)
 
 MISSING_COLOR = "#bdbdbd"
+BUDGET_FIT_COLOR_WITHIN = "#2e7d32"
+BUDGET_FIT_COLOR_STRETCH = "#f9a825"
+BUDGET_FIT_COLOR_OVER = "#c62828"
 METRIC_PRICE = "price_per_sqm"
 METRIC_CHANGE_1Y = "pct_change_1y"
 METRIC_CHANGE_5Y = "pct_change_5y"
@@ -27,6 +39,7 @@ METRIC_CHANGE_1Y_REAL = "pct_change_1y_real"
 METRIC_CHANGE_5Y_REAL = "pct_change_5y_real"
 METRIC_SALES = "sales_4q"
 METRIC_PRICE_TO_INCOME = "price_to_income"
+METRIC_FITS_BUDGET = "fits_budget"
 
 METRIC_CHOICES: tuple[tuple[str, str], ...] = (
     (METRIC_PRICE, "Price per square metre"),
@@ -36,6 +49,7 @@ METRIC_CHOICES: tuple[tuple[str, str], ...] = (
     (METRIC_CHANGE_5Y_REAL, "5-year change (real)"),
     (METRIC_SALES, "Number of sales (last 4 quarters)"),
     (METRIC_PRICE_TO_INCOME, "Price-to-income ratio (rough)"),
+    (METRIC_FITS_BUDGET, "Fits my budget"),
 )
 
 BUILDING_TYPE_CHOICES: tuple[tuple[str, str], ...] = (
@@ -54,6 +68,19 @@ METRIC_UNITS: dict[str, str] = {
     METRIC_CHANGE_5Y_REAL: "%",
     METRIC_SALES: "sales",
     METRIC_PRICE_TO_INCOME: "years income / m²",
+    METRIC_FITS_BUDGET: "vs budget",
+}
+
+BUDGET_FIT_LABELS: dict[str, str] = {
+    BUDGET_FIT_WITHIN: "Within budget",
+    BUDGET_FIT_STRETCH: "Up to 20% over budget",
+    BUDGET_FIT_OVER: "More than 20% over budget",
+}
+
+BUDGET_FIT_COLORS: dict[str, str] = {
+    BUDGET_FIT_WITHIN: BUDGET_FIT_COLOR_WITHIN,
+    BUDGET_FIT_STRETCH: BUDGET_FIT_COLOR_STRETCH,
+    BUDGET_FIT_OVER: BUDGET_FIT_COLOR_OVER,
 }
 
 _PCT_CHANGE_METRICS = frozenset(
@@ -317,6 +344,102 @@ def prepare_map_dataframe(
     return pd.DataFrame(records)
 
 
+def _budget_ratio_and_category(
+    typical_price: float, max_affordable_price: float
+) -> tuple[float, str]:
+    """Ratio/category for one area, treating a non-positive budget as unaffordable
+    rather than raising (a 0 EUR max affordable price is a valid user input, e.g.
+    100% down payment)."""
+    if max_affordable_price <= 0:
+        return float("inf"), BUDGET_FIT_OVER
+    ratio = price_to_budget_ratio(typical_price, max_affordable_price)
+    return ratio, classify_budget_fit_ratio(ratio)
+
+
+def format_budget_fit_hover(
+    row: Mapping[str, Any],
+    *,
+    max_affordable_price: float,
+    size_sqm: float,
+) -> str:
+    postal = str(row.get("postal_code", "")).zfill(5)
+    name = row.get("area_name") or ""
+    price_sqm = row.get("price_per_sqm")
+    if price_sqm is None or (isinstance(price_sqm, float) and np.isnan(price_sqm)) or pd.isna(
+        price_sqm
+    ):
+        return (
+            f"<b>{postal}</b> {name}<br>"
+            f"{NO_DATA_HOVER}<br>"
+            f"Reliability: {reliability_display(row.get('reliability'))}"
+        )
+    typical = typical_dwelling_price(float(price_sqm), size_sqm)
+    ratio, category = _budget_ratio_and_category(typical, max_affordable_price)
+    ratio_display = "∞" if math.isinf(ratio) else f"{ratio:.2f}"
+    lines = [
+        f"<b>{postal}</b> {name}",
+        f"Typical price ({size_sqm:g} m²): {typical:,.0f} EUR",
+        f"Max affordable: {max_affordable_price:,.0f} EUR",
+        f"Ratio to budget: {ratio_display}",
+        f"Fits budget: {BUDGET_FIT_LABELS[category]}",
+        f"Reliability: {reliability_display(row.get('reliability'))}",
+    ]
+    if str(row.get("reliability")) == "low":
+        lines.append(LOW_RELIABILITY_HOVER)
+    return "<br>".join(lines)
+
+
+def prepare_budget_fit_dataframe(
+    prices_df: pd.DataFrame,
+    boundaries: Mapping[str, Any],
+    quarter: str,
+    building_type_code: str | None,
+    size_sqm: float,
+    max_affordable_price: float,
+    *,
+    cpi_df: pd.DataFrame | None = None,
+    demographics_df: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """Map layer comparing typical dwelling prices to a max affordable price."""
+    base = prepare_map_dataframe(
+        prices_df,
+        boundaries,
+        quarter,
+        building_type_code,
+        METRIC_PRICE,
+        cpi_df=cpi_df,
+        demographics_df=demographics_df,
+    )
+    if base.empty:
+        return base
+
+    records: list[dict[str, Any]] = []
+    for row in base.to_dict("records"):
+        price_sqm = row.get("price_per_sqm")
+        missing_price = price_sqm is None or (
+            isinstance(price_sqm, float) and np.isnan(price_sqm)
+        ) or pd.isna(price_sqm)
+        if missing_price:
+            category = None
+            ratio = float("nan")
+            missing = True
+        else:
+            typical = typical_dwelling_price(float(price_sqm), size_sqm)
+            ratio, category = _budget_ratio_and_category(typical, max_affordable_price)
+            missing = False
+        record = dict(row)
+        record["budget_ratio"] = ratio
+        record["budget_fit"] = category
+        record["missing"] = missing
+        record["hover"] = format_budget_fit_hover(
+            row,
+            max_affordable_price=max_affordable_price,
+            size_sqm=size_sqm,
+        )
+        records.append(record)
+    return pd.DataFrame(records)
+
+
 def search_area_matches(map_df: pd.DataFrame, query: str) -> list[str]:
     """Postal codes whose code or area name contains ``query`` (case-insensitive)."""
     text = query.strip().lower()
@@ -369,6 +492,72 @@ def _feature_subset(boundaries: Mapping[str, Any], codes: Any) -> dict[str, Any]
     return {"type": "FeatureCollection", "features": features}
 
 
+def build_budget_fit_choropleth_figure(
+    map_df: pd.DataFrame,
+    boundaries: Mapping[str, Any],
+) -> go.Figure:
+    """Choropleth coloured by whether typical prices fit the user's budget."""
+    if map_df.empty:
+        fig = go.Figure()
+        fig.update_layout(
+            map_style="carto-positron",
+            map_center={"lat": 64.5, "lon": 26.0},
+            map_zoom=4,
+            margin={"l": 0, "r": 0, "t": 0, "b": 0},
+        )
+        return fig
+
+    fig = go.Figure()
+    order = (BUDGET_FIT_WITHIN, BUDGET_FIT_STRETCH, BUDGET_FIT_OVER)
+    for category in order:
+        subset = map_df.loc[map_df["budget_fit"] == category]
+        if subset.empty:
+            continue
+        color = BUDGET_FIT_COLORS[category]
+        fig.add_trace(
+            go.Choroplethmap(
+                geojson=_feature_subset(boundaries, subset["postal_code"]),
+                locations=subset["postal_code"],
+                z=[1.0] * len(subset),
+                featureidkey="properties.postal_code",
+                colorscale=_solid_colorscale(color),
+                zmin=0,
+                zmax=1,
+                showscale=False,
+                marker={"line": {"width": 0.5, "color": "white"}},
+                hovertext=subset["hover"],
+                hoverinfo="text",
+                name=BUDGET_FIT_LABELS[category],
+            )
+        )
+
+    missing = map_df.loc[map_df["missing"]]
+    if not missing.empty:
+        fig.add_trace(
+            go.Choroplethmap(
+                geojson=_feature_subset(boundaries, missing["postal_code"]),
+                locations=missing["postal_code"],
+                z=[0.0] * len(missing),
+                featureidkey="properties.postal_code",
+                colorscale=_solid_colorscale(MISSING_COLOR),
+                zmin=0,
+                zmax=1,
+                showscale=False,
+                marker={"line": {"width": 0.5, "color": "#757575"}},
+                hovertext=missing["hover"],
+                hoverinfo="text",
+                name="No price data",
+            )
+        )
+
+    fig.update_layout(
+        map_style="carto-positron",
+        margin={"l": 0, "r": 0, "t": 0, "b": 0},
+        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "x": 0},
+    )
+    return fig
+
+
 def build_choropleth_figure(
     map_df: pd.DataFrame,
     boundaries: Mapping[str, Any],
@@ -377,6 +566,9 @@ def build_choropleth_figure(
     color_range: tuple[float, float] | None = None,
 ) -> go.Figure:
     """Build a MapLibre choropleth with grey areas for missing metric values."""
+    if metric == METRIC_FITS_BUDGET:
+        return build_budget_fit_choropleth_figure(map_df, boundaries)
+
     if map_df.empty:
         fig = go.Figure()
         fig.update_layout(
