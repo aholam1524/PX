@@ -589,20 +589,20 @@ def _render_municipality_panel(
     c1, c2 = st.columns(2)
     c1.metric(
         "Price per m² (EUR)",
-        format_metric_value(card.price_per_sqm or float("nan"), METRIC_PRICE)
+        format_metric_value(card.price_per_sqm, METRIC_PRICE)
         if card.price_per_sqm is not None
         else "No data",
     )
     c2.metric(
         "1-year change",
-        format_metric_value(card.pct_change_1y or float("nan"), METRIC_CHANGE_1Y)
+        format_metric_value(card.pct_change_1y, METRIC_CHANGE_1Y)
         if card.pct_change_1y is not None
         else "—",
     )
     c3, c4 = st.columns(2)
     c3.metric(
         "5-year change",
-        format_metric_value(card.pct_change_5y or float("nan"), METRIC_CHANGE_5Y)
+        format_metric_value(card.pct_change_5y, METRIC_CHANGE_5Y)
         if card.pct_change_5y is not None
         else "—",
     )
