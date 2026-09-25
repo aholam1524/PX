@@ -51,6 +51,8 @@ jobs:
             printf 'Title: %s\n' "$PR_TITLE"
             printf 'URL: %s\n\n' "$PR_URL"
             printf '### Description\n\n%s\n' "$PR_BODY"
+            printf '\n\n## Review efficiency\n\n'
+            printf '%s\n' 'Start with `gh pr diff` and `gh pr view` for this PR. Read only the files that changed; do not explore the rest of the repository. Post **one** review comment (`gh pr review --comment` or `gh pr comment`) as soon as your analysis is done, well before you run out of turns. If you have no findings, still post one comment saying so.'
           } > /tmp/review-prompt.md
           delimiter="$(openssl rand -hex 16)"
           {
@@ -67,7 +69,7 @@ jobs:
           prompt: ${{ steps.build-prompt.outputs.prompt }}
           claude_args: |
             --model claude-sonnet-5
-            --max-turns 15
+            --max-turns 40
             --allowedTools "Read,Glob,Grep,Bash(gh pr comment:*),Bash(gh pr review:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
 
   fix:
@@ -139,6 +141,7 @@ jobs:
           - Do not edit `.github/`, `.cursor/`, or anything under `.asd-factory/` (ASD factory).
           - Use `git add`, `git commit`, and `git push` only for your fixes on this branch.
           - You may use `gh pr view` and `gh pr comment` to read the PR and post a brief summary if helpful.
+          - Read the review comments first, make the fixes, and stop.
           EOF
           {
             printf '\n\n## Pull request\n\n'
@@ -164,7 +167,7 @@ jobs:
           prompt: ${{ steps.build-fix-prompt.outputs.prompt }}
           claude_args: |
             --model claude-sonnet-5
-            --max-turns 25
+            --max-turns 40
             --allowedTools "Read,Edit,Write,Glob,Grep,Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(pytest:*),Bash(python:*),Bash(npm:*),Bash(npx:*),Bash(make:*),Bash(cargo:*),Bash(go test:*),Bash(go:*)"
 
   merge:
@@ -186,8 +189,24 @@ jobs:
           GH_TOKEN: ${{ secrets.FACTORY_GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          if ! gh pr checks "$PR_NUMBER" --watch --fail-fast; then
-            gh pr comment "$PR_NUMBER" --body "Factory: automatic merge into \`dev\` skipped — one or more required CI checks did not pass after the Claude fix pass."
+          HEAD_SHA="$(gh pr view "$PR_NUMBER" --json headRefOid -q .headRefOid)"
+
+          FACTORY_CI_RUN=""
+          for _ in $(seq 1 24); do
+            FACTORY_CI_RUN="$(gh run list --commit="$HEAD_SHA" --workflow=factory-ci.yml --json databaseId --jq '.[0].databaseId // empty')"
+            if [[ -n "$FACTORY_CI_RUN" ]]; then
+              break
+            fi
+            sleep 5
+          done
+
+          if [[ -z "$FACTORY_CI_RUN" ]]; then
+            gh pr comment "$PR_NUMBER" --body "Factory: automatic merge into \`dev\` skipped — the Factory CI check did not appear on the current head commit within two minutes after the Claude fix pass."
+            exit 0
+          fi
+
+          if ! gh run watch "$FACTORY_CI_RUN" --exit-status; then
+            gh pr comment "$PR_NUMBER" --body "Factory: automatic merge into \`dev\` skipped — Factory CI did not pass on the current head commit after the Claude fix pass."
             exit 0
           fi
           if ! gh pr merge "$PR_NUMBER" --merge; then
