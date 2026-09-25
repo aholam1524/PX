@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -11,14 +12,23 @@ import pytest
 
 from housing_analyzer.data.prices import parse_json_stat2
 from housing_analyzer.map import (
+    LOW_RELIABILITY_OUTLINE_COLOR,
+    MAP_TOP_MARGIN,
     METRIC_CHANGE_1Y,
     METRIC_CHANGE_1Y_REAL,
     METRIC_CHANGE_5Y,
+    METRIC_CHANGE_5Y_REAL,
     METRIC_PRICE,
+    METRIC_PRICE_TO_INCOME,
     METRIC_SALES,
     NO_CPI_HOVER,
     NO_DATA_HOVER,
+    NO_DATA_FILL,
+    VALUE_COLORSCALE,
+    _hex_luminance,
     build_choropleth_figure,
+    plotly_map_chart_config,
+    value_colorbar,
     default_map_quarter,
     format_hover_text,
     latest_quarter_with_data,
@@ -204,6 +214,107 @@ def test_sales_metric_uses_trailing_sum(sample_prices_frame, sample_boundaries, 
     )
     row = frame.loc[frame["postal_code"] == "00100"].iloc[0]
     assert row[METRIC_SALES] == pytest.approx(50.0)
+
+
+def _value_layer_traces(fig):
+    return [t for t in fig.data if t.name == "Areas with data"]
+
+
+def _no_data_traces(fig):
+    return [t for t in fig.data if t.name == "No data"]
+
+
+def _normalize_colorscale(scale) -> list[list[Any]]:
+    return [[float(stop[0]), str(stop[1])] for stop in scale]
+
+
+def test_value_layers_use_light_to_dark_greyscale_not_viridis(
+    sample_prices_frame, sample_boundaries, cpi_df
+):
+    metrics = (
+        METRIC_PRICE,
+        METRIC_CHANGE_1Y,
+        METRIC_CHANGE_5Y,
+        METRIC_CHANGE_1Y_REAL,
+        METRIC_CHANGE_5Y_REAL,
+        METRIC_SALES,
+        METRIC_PRICE_TO_INCOME,
+    )
+    low_lum = _hex_luminance(VALUE_COLORSCALE[0][1])
+    high_lum = _hex_luminance(VALUE_COLORSCALE[1][1])
+    assert low_lum > high_lum
+    for metric in metrics:
+        frame = prepare_map_dataframe(
+            sample_prices_frame,
+            sample_boundaries,
+            "2024Q4",
+            "all",
+            metric,
+            cpi_df=cpi_df,
+        )
+        fig = build_choropleth_figure(frame, sample_boundaries, metric)
+        for trace in _value_layer_traces(fig):
+            assert trace.colorscale != "Viridis"
+            assert _normalize_colorscale(trace.colorscale) == VALUE_COLORSCALE
+            stops = _normalize_colorscale(trace.colorscale)
+            assert _hex_luminance(stops[0][1]) > _hex_luminance(stops[-1][1])
+
+
+def test_no_data_trace_is_transparent_not_from_value_scale(
+    sample_prices_frame, sample_boundaries, cpi_df
+):
+    frame = prepare_map_dataframe(
+        sample_prices_frame,
+        sample_boundaries,
+        "2024Q4",
+        "1",
+        METRIC_PRICE,
+        cpi_df=cpi_df,
+    )
+    fig = build_choropleth_figure(frame, sample_boundaries, METRIC_PRICE)
+    scale_colors = {stop[1] for stop in VALUE_COLORSCALE}
+    for trace in _no_data_traces(fig):
+        fill = trace.colorscale[0][1]
+        assert fill == NO_DATA_FILL
+        assert fill not in scale_colors
+
+
+def test_low_reliability_outline_differs_from_value_scale_ends():
+    scale_ends = {VALUE_COLORSCALE[0][1], VALUE_COLORSCALE[1][1]}
+    assert LOW_RELIABILITY_OUTLINE_COLOR not in scale_ends
+    from housing_analyzer.map import NORMAL_OUTLINE_COLOR
+
+    assert NORMAL_OUTLINE_COLOR not in scale_ends
+
+
+def test_choropleth_layout_leaves_room_for_toolbar_and_colorbar(
+    sample_prices_frame, sample_boundaries, cpi_df
+):
+    frame = prepare_map_dataframe(
+        sample_prices_frame,
+        sample_boundaries,
+        "2024Q4",
+        "all",
+        METRIC_PRICE,
+        cpi_df=cpi_df,
+    )
+    fig = build_choropleth_figure(frame, sample_boundaries, METRIC_PRICE)
+    assert fig.layout.margin.t >= 30
+    assert fig.layout.margin.t >= MAP_TOP_MARGIN
+    value_traces = _value_layer_traces(fig)
+    assert value_traces
+    colorbar = value_traces[0].colorbar
+    assert colorbar.y <= 0.2
+    assert colorbar.len <= 0.85
+    pct_bar = value_colorbar(METRIC_CHANGE_1Y, "1-year change (%)", -12.0, 12.0)
+    assert 0.0 in pct_bar["tickvals"]
+
+
+def test_plotly_map_chart_config_trims_toolbar():
+    config = plotly_map_chart_config()
+    assert config["displaylogo"] is False
+    removed = set(config["modeBarButtonsToRemove"])
+    assert {"select2d", "lasso2d", "autoScale2d"}.issubset(removed)
 
 
 def test_build_choropleth_figure_returns_figure(
