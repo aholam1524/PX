@@ -73,6 +73,14 @@ Happy path needs no manual labels. `main` is never auto-merged.
 
 Watch SDK-launched agents (Dev, Test, Fixer, Conflict) in Cursor: Agents → Filter → Source → SDK. Review, the fix pass, and the merge-into-`dev` step run in the **Claude review** workflow, not as Cursor cloud agents.
 
+### Claude fix pass
+
+After review, one **fix pass** may commit and push to the feature branch. It must not edit `.cursor/` or anything under `.asd-factory/`, and it must not create new files under `.github/`. It **may** edit a file under `.github/` only when that file is already part of the PR diff against `dev` (typical for factory wiring changes).
+
+Each fix pass posts a **Fix pass result** PR comment: a table with one row per review finding (`fixed` with commit details, or `not fixed` with a reason), plus an HTML marker `<!-- factory:fix-result:all-addressed -->` or `<!-- factory:fix-result:open-findings -->`. The workflow also posts whether any commits were pushed (`Fix pass pushed N commit(s): …` or `Fix pass pushed no commits`). The fix-once marker is posted only after a **successful** fix pass; a failed fix pass leaves no marker so re-adding `agent-review` retries the fix.
+
+Repository variable **`FACTORY_BLOCK_ON_OPEN_FINDINGS`**: set to `true` under **Settings → Secrets and variables → Actions → Variables** to skip automatic merge into `dev` when the fix pass ends with `open-findings`. When unset or not `true` (default), merge proceeds as today and a one-line warning is added if findings were still open.
+
 ## Usage reporting
 
 When **Claude review** runs on a feature PR (`agent-review`), the workflow posts **one** PR comment (updated after each job) with a table of **review**, **fix**, and **merge** job usage: Claude turns, input/output/cache token counts, an **API-equivalent cost estimate**, Linux runner minutes (billed, rounded up), and estimated Linux cost. The same table is written to each job’s GitHub Actions step summary. If any of those jobs fails, it also posts **one** comment per workflow run (with a run id marker) listing the failed jobs and linking to the Actions run, and sets the linked issue (`Closes #N` in the PR body) to `factory-blocked` unless it is already `factory-done`. Re-add `agent-review` to retry.
