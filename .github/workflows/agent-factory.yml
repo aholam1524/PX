@@ -64,6 +64,7 @@ jobs:
       - name: Dispatch factory
         env:
           CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+          REVIEW_PROVIDER: claude
           GH_TOKEN: ${{ secrets.FACTORY_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.FACTORY_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
         run: python .asd-factory/factory/dispatch.py
