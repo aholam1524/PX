@@ -132,6 +132,11 @@ def _snapshot_boundaries_available() -> bool:
     return data_paths.BOUNDARIES_SNAPSHOT_FILE.is_file()
 
 
+def _load_boundaries_fixture() -> dict[str, Any]:
+    with data_paths.BOUNDARIES_FIXTURE_FILE.open(encoding="utf-8") as handle:
+        return json.load(handle)
+
+
 def load_boundaries(
     *,
     refresh: bool = False,
@@ -139,6 +144,9 @@ def load_boundaries(
     fetch_geojson: Callable[[str], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Load simplified boundaries from snapshot, cache, or WFS."""
+    if data_paths.use_fixtures():
+        return _load_boundaries_fixture()
+
     if refresh:
         collection = fetch_boundaries(fetch_geojson=fetch_geojson)
         if simplify_tolerance != DEFAULT_SIMPLIFY_TOLERANCE:

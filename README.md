@@ -4,7 +4,7 @@ App repo. The agent factory lives in [aholam1524/ASD](https://github.com/aholam1
 
 ## Housing price analyzer
 
-Interactive map and analysis for **Finnish housing prices** by postal-code area: map colouring by price metrics, plus trends, comparison, ranking, and affordability for a selected area (features arrive in later tickets).
+Interactive map and analysis for **Finnish housing prices** by postal-code area. The Streamlit app shows a **MapLibre choropleth** of postal-code boundaries coloured by your chosen metric (price per square metre, 1- or 5-year change, or sales in the last four quarters). Use the sidebar to pick quarter and building type; hover for details, click or search to select an area and see a short summary card. Grey areas have no published price; lighter borders and hover notes mark low-reliability estimates.
 
 **Run locally** (Python 3.12):
 
@@ -13,9 +13,15 @@ pip install -r requirements.txt
 streamlit run app/streamlit_app.py
 ```
 
-- **`housing_analyzer/`** — data and analysis code
+**Run without network or snapshot** (small fixture data under `tests/fixtures/`):
+
+```bash
+HOUSING_USE_FIXTURES=1 streamlit run app/streamlit_app.py
+```
+
+- **`housing_analyzer/`** — data, analysis, and map figure helpers (`housing_analyzer/map.py`)
 - **`app/streamlit_app.py`** — Streamlit UI
-- **`tests/`** — pytest (fixtures under `tests/fixtures/` when added)
+- **`tests/`** — pytest; fixtures under `tests/fixtures/` for offline runs
 
 ### Data
 

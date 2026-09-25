@@ -385,8 +385,20 @@ def _snapshot_prices_available() -> bool:
     return data_paths.PRICES_SNAPSHOT_FILE.is_file()
 
 
+def _load_prices_fixture() -> pd.DataFrame:
+    import json
+
+    path = data_paths.PRICES_FIXTURE_FILE
+    with path.open(encoding="utf-8") as handle:
+        dataset = json.load(handle)
+    return parse_json_stat2(dataset)
+
+
 def load_prices(*, refresh: bool = False) -> pd.DataFrame:
     """Load housing prices from snapshot, cache, or PxWeb."""
+    if data_paths.use_fixtures():
+        return _load_prices_fixture()
+
     if refresh:
         frame = fetch_prices(refresh=True)
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
