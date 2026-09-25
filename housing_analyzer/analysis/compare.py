@@ -11,8 +11,6 @@ import plotly.graph_objects as go
 
 from housing_analyzer.analysis.metrics import quarter_index, summarize_areas, to_real
 from housing_analyzer.data.cpi import cpi_by_quarter
-from housing_analyzer.map import trailing_sales_by_area
-from housing_analyzer.panel import index_series_to_100, quarterly_area_prices
 
 
 def area_catalog(prices_df: pd.DataFrame) -> pd.DataFrame:
@@ -152,6 +150,8 @@ def build_compare_chart_data(
     use_real: bool = False,
     cpi_quarterly: pd.Series | None = None,
 ) -> CompareChartData:
+    from housing_analyzer.panel import index_series_to_100, quarterly_area_prices
+
     work_df = prices_df
     price_column = "price_per_sqm"
     if use_real and cpi_quarterly is not None:
