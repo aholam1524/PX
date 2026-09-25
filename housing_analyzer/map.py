@@ -31,6 +31,14 @@ from housing_analyzer.affordability import (
 MISSING_COLOR = "#e5e7eb"
 MISSING_OUTLINE_COLOR = "#d1d5db"
 MISSING_OUTLINE_WIDTH = 0.3
+NO_DATA_FILL = "rgba(0,0,0,0)"
+VALUE_COLORSCALE: list[list[Any]] = [[0.0, "#f0f0f0"], [1.0, "#000000"]]
+LOW_RELIABILITY_OUTLINE_COLOR = "#f59e0b"
+LOW_RELIABILITY_OUTLINE_WIDTH = 1.5
+NORMAL_OUTLINE_COLOR = "#9ca3af"
+NORMAL_OUTLINE_WIDTH = 0.4
+MAP_TOP_MARGIN = 40
+MAP_LAYOUT_MARGINS = {"l": 0, "r": 0, "t": MAP_TOP_MARGIN, "b": 0}
 PROVISIONAL_COVERAGE_RATIO = 0.85
 PRIOR_QUARTERS_FOR_COVERAGE = 8
 DEFAULT_COLOR_PERCENTILE_LOW = 2.0
@@ -587,6 +595,50 @@ def _solid_colorscale(color: str) -> list[list[Any]]:
     return [[0.0, color], [1.0, color]]
 
 
+def plotly_map_chart_config() -> dict[str, Any]:
+    """Plotly config for the housing map (toolbar trimmed, selection still works)."""
+    return {
+        "displayModeBar": True,
+        "displaylogo": False,
+        "modeBarButtonsToRemove": ["select2d", "lasso2d", "autoScale2d"],
+    }
+
+
+def _hex_luminance(hex_color: str) -> float:
+    """Relative luminance of a ``#rrggbb`` colour (0 = dark, 1 = light)."""
+    text = hex_color.strip().lstrip("#")
+    if len(text) != 6:
+        raise ValueError(f"expected #rrggbb, got {hex_color!r}")
+    r, g, b = (int(text[i : i + 2], 16) / 255.0 for i in (0, 2, 4))
+
+    def channel(c: float) -> float:
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+
+    r, g, b = channel(r), channel(g), channel(b)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def value_colorbar(metric: str, title: str, zmin: float, zmax: float) -> dict[str, Any]:
+    """Colour bar layout that stays below the Plotly mode bar."""
+    colorbar: dict[str, Any] = {
+        "title": {"text": title, "side": "right"},
+        "y": 0.12,
+        "len": 0.78,
+        "yanchor": "bottom",
+    }
+    if metric in _PCT_CHANGE_METRICS and zmin < 0 < zmax:
+        colorbar["tickmode"] = "array"
+        colorbar["tickvals"] = [zmin, 0.0, zmax]
+    return colorbar
+
+
+def _reliability_outlines(reliability: pd.Series) -> dict[str, list[Any]]:
+    low = reliability == "low"
+    width = np.where(low, LOW_RELIABILITY_OUTLINE_WIDTH, NORMAL_OUTLINE_WIDTH)
+    color = np.where(low, LOW_RELIABILITY_OUTLINE_COLOR, NORMAL_OUTLINE_COLOR)
+    return {"width": width.tolist(), "color": color.tolist()}
+
+
 def _feature_subset(boundaries: Mapping[str, Any], codes: Any) -> dict[str, Any]:
     """GeoJSON with only the features for ``codes``, so each map trace carries its own areas.
 
@@ -613,7 +665,7 @@ def build_budget_fit_choropleth_figure(
             map_style="carto-positron",
             map_center={"lat": 64.5, "lon": 26.0},
             map_zoom=4,
-            margin={"l": 0, "r": 0, "t": 0, "b": 0},
+            margin=MAP_LAYOUT_MARGINS,
         )
         return fig
 
@@ -667,7 +719,7 @@ def build_budget_fit_choropleth_figure(
 
     fig.update_layout(
         map_style="carto-positron",
-        margin={"l": 0, "r": 0, "t": 0, "b": 0},
+        margin=MAP_LAYOUT_MARGINS,
         legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "x": 0},
     )
     return fig
@@ -690,7 +742,7 @@ def build_choropleth_figure(
             map_style="carto-positron",
             map_center={"lat": 64.5, "lon": 26.0},
             map_zoom=4,
-            margin={"l": 0, "r": 0, "t": 0, "b": 0},
+            margin=MAP_LAYOUT_MARGINS,
         )
         return fig
 
@@ -708,26 +760,19 @@ def build_choropleth_figure(
     fig = go.Figure()
 
     if not with_data.empty:
-        low = with_data["reliability"] == "low"
-        line_width = np.where(low, 2.0, 0.5)
-        line_color = np.where(low, "#616161", "white")
+        outlines = _reliability_outlines(with_data["reliability"])
         fig.add_trace(
             go.Choroplethmap(
                 geojson=_feature_subset(boundaries, with_data["postal_code"]),
                 locations=with_data["postal_code"],
                 z=with_data[metric],
                 featureidkey="properties.postal_code",
-                colorscale="Viridis",
+                colorscale=VALUE_COLORSCALE,
                 zmin=zmin,
                 zmax=zmax,
-                marker={
-                    "line": {
-                        "width": line_width.tolist(),
-                        "color": line_color.tolist(),
-                    }
-                },
+                marker={"line": outlines},
                 showscale=True,
-                colorbar={"title": color_label},
+                colorbar=value_colorbar(metric, color_label, zmin, zmax),
                 customdata=with_data[["postal_code", "area_name"]],
                 hovertext=with_data["hover"],
                 hoverinfo="text",
@@ -742,7 +787,7 @@ def build_choropleth_figure(
                 locations=missing["postal_code"],
                 z=[0.0] * len(missing),
                 featureidkey="properties.postal_code",
-                colorscale=_solid_colorscale(MISSING_COLOR),
+                colorscale=_solid_colorscale(NO_DATA_FILL),
                 zmin=0,
                 zmax=1,
                 showscale=False,
@@ -760,7 +805,7 @@ def build_choropleth_figure(
 
     fig.update_layout(
         map_style="carto-positron",
-        margin={"l": 0, "r": 0, "t": 0, "b": 0},
+        margin=MAP_LAYOUT_MARGINS,
         legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "x": 0},
     )
     return fig

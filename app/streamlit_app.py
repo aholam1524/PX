@@ -77,6 +77,7 @@ from housing_analyzer.map import (
     metric_color_range,
     postal_code_from_selection,
     prepare_budget_fit_dataframe,
+    plotly_map_chart_config,
     prepare_map_dataframe,
     quarter_meets_coverage_threshold,
     resolve_building_type_label,
@@ -922,7 +923,8 @@ with map_tab:
                 f"price ({max_affordable_price:,.0f} EUR from the sidebar budget).\n"
                 "- **Amber** — typical price is up to 20% above that maximum.\n"
                 "- **Red** — more than 20% above the maximum.\n"
-                "- **Grey** — no published price for the chosen quarter and building type.\n"
+                "- **Grey** — no published price for the chosen quarter and building type "
+                "(budget layer only; value layers leave these areas unfilled).\n"
                 "- Typical price = area EUR/m² × apartment size (sidebar). "
                 "Uses the same loan assumptions as the Affordability tab."
             )
@@ -930,12 +932,13 @@ with map_tab:
                 st.caption(f"**{label}**")
         else:
             st.markdown(
+                "- **Darker fill** means a **higher** value; **lighter fill** means lower (light grey to black).\n"
                 "- **Coloured areas** show the selected metric for the chosen quarter and building type.\n"
-                "- **Grey areas** have no published price for that selection "
+                "- **Unfilled areas** (outline only) have no published value for that selection "
                 f"({METRIC_PRICE.replace('_', ' ')} missing or suppressed); they are never shown as zero.\n"
                 "- With **Fill gaps with municipality values** on, a **lighter municipality fill** "
                 "shows yearly averages where postal-code prices are missing; postal detail stays on top.\n"
-                "- **Lighter borders** and the hover note *Based on few sales* mark **low reliability** "
+                "- **Amber borders** and the hover note *Based on few sales* mark **low reliability** "
                 "(fewer than ten sales in the last four quarters).\n"
                 "- Hover a region for postal code, area name, metric value, sales, and reliability."
             )
@@ -976,6 +979,7 @@ with map_tab:
             use_container_width=True,
             on_select="rerun",
             key="housing_map",
+            config=plotly_map_chart_config(),
         )
 
         if not map_df.empty:
@@ -992,7 +996,7 @@ with map_tab:
                 st.caption(
                     f"{areas_with_metric} of {total_areas} areas have a published price for this "
                     "selection. Statistics Finland publishes prices only for areas with enough "
-                    "sales; the rest are shown in grey and are never treated as zero."
+                    "sales; the rest are unfilled (outline only) and are never treated as zero."
                 )
             if metric != METRIC_FITS_BUDGET and not use_full_color_range:
                 st.caption(
