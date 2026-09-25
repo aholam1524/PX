@@ -19,6 +19,20 @@ streamlit run app/streamlit_app.py
 HOUSING_USE_FIXTURES=1 streamlit run app/streamlit_app.py
 ```
 
+### Hosting
+
+Deploy on [Streamlit Community Cloud](https://docs.streamlit.io/deploy/streamlit-community-cloud) from this public GitHub repository (you connect the repo in the browser; no deploy step in this repo).
+
+1. Sign in to [Streamlit Community Cloud](https://share.streamlit.io/) with GitHub and authorize access to this repository.
+2. Click **New app**, choose **aholam1524/PX** (or your fork), then pick the branch:
+   - **`dev`** — preview app that tracks the integration branch.
+   - **`main`** — stable app after releases merge to `main`.
+3. Set **Main file path** to `app/streamlit_app.py`.
+4. Under **Advanced settings**, set **Python version** to **3.12**. No secrets or environment variables are required for the default snapshot-backed app.
+5. Deploy. The app reads committed files under `data/snapshot/`; it does not download live Statistics Finland data on first load.
+
+Two apps (one on `dev`, one on `main`) are a practical setup: preview changes on `dev` before the snapshot and code reach `main`. For limits, billing, and platform behavior, see Streamlit’s [Community Cloud documentation](https://docs.streamlit.io/deploy/streamlit-community-cloud).
+
 - **`housing_analyzer/`** — data, analysis, and map figure helpers (`housing_analyzer/map.py`)
 - **`app/streamlit_app.py`** — Streamlit UI
 - **`tests/`** — pytest; fixtures under `tests/fixtures/` for offline runs
