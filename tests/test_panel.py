@@ -163,6 +163,53 @@ def test_trend_chart_index_mode(sample_prices_frame, sample_boundaries):
     assert raw.indexed is False
 
 
+def test_build_trend_chart_data_real_prices_are_cpi_deflated(
+    sample_prices_frame, sample_boundaries
+):
+    """use_real=True must deflate by CPI, not just relabel the nominal series."""
+    cpi = pd.DataFrame(
+        {
+            "month": pd.to_datetime(
+                [
+                    "2024-07-01",
+                    "2024-08-01",
+                    "2024-09-01",
+                    "2024-10-01",
+                    "2024-11-01",
+                    "2024-12-01",
+                ]
+            ),
+            "cpi": [100.0, 100.0, 100.0, 102.0, 102.0, 102.0],
+        }
+    )
+    building_type = "1 — Blocks of flats, one-room flat"
+
+    nominal = build_trend_chart_data(
+        sample_prices_frame, sample_boundaries, "00100", building_type
+    )
+    real = build_trend_chart_data(
+        sample_prices_frame,
+        sample_boundaries,
+        "00100",
+        building_type,
+        use_real=True,
+        cpi_df=cpi,
+    )
+
+    assert real.use_real is True
+    assert nominal.use_real is False
+
+    q3_index = real.quarters.index("2024Q3")
+    q4_index = real.quarters.index("2024Q4")
+
+    # 2024Q4 is the CPI base quarter, so real == nominal there.
+    assert real.area_prices[q4_index] == pytest.approx(nominal.area_prices[q4_index])
+    # 2024Q3 gets scaled up by the base/quarter CPI ratio (102/100).
+    assert real.area_prices[q3_index] == pytest.approx(
+        nominal.area_prices[q3_index] * (102.0 / 100.0)
+    )
+
+
 def test_area_export_frame_filters_building_type(sample_prices_frame):
     all_rows = area_detail_export_frame(sample_prices_frame, "00100", None)
     bt = sample_prices_frame.loc[

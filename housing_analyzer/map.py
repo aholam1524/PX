@@ -60,7 +60,10 @@ _PCT_CHANGE_METRICS = frozenset(
     }
 )
 
+_REAL_CHANGE_METRICS = frozenset({METRIC_CHANGE_1Y_REAL, METRIC_CHANGE_5Y_REAL})
+
 NO_DATA_HOVER = "No data (too few sales or not published)"
+NO_CPI_HOVER = "No data (CPI not final for this quarter yet)"
 LOW_RELIABILITY_HOVER = "Based on few sales"
 
 
@@ -199,13 +202,20 @@ def reliability_display(label: str | None) -> str:
     return mapping.get(str(label), str(label))
 
 
-def format_hover_text(row: Mapping[str, Any], metric: str) -> str:
+def format_hover_text(
+    row: Mapping[str, Any], metric: str, *, cpi_available: bool = True
+) -> str:
     postal = str(row.get("postal_code", "")).zfill(5)
     name = row.get("area_name") or ""
     if metric_is_missing(row, metric):
+        reason = (
+            NO_CPI_HOVER
+            if metric in _REAL_CHANGE_METRICS and not cpi_available
+            else NO_DATA_HOVER
+        )
         return (
             f"<b>{postal}</b> {name}<br>"
-            f"{NO_DATA_HOVER}<br>"
+            f"{reason}<br>"
             f"Reliability: {reliability_display(row.get('reliability'))}"
         )
 
@@ -253,6 +263,7 @@ def prepare_map_dataframe(
     codes = frame["postal_code"].astype(str).str.zfill(5)
     cpi = cpi_df if cpi_df is not None else load_cpi()
     cpi_quarterly = cpi_by_quarter(cpi)
+    cpi_available = quarter in cpi_quarterly.index
     prices_real = to_real(prices_df, cpi_quarterly)
     summaries = summarize_areas(
         prices_df, quarter, building_type=bt_label, df_real=prices_real
@@ -279,7 +290,9 @@ def prepare_map_dataframe(
     records = enriched.to_dict("records")
     for record in records:
         record["missing"] = metric_is_missing(record, metric)
-        record["hover"] = format_hover_text(record, metric)
+        record["hover"] = format_hover_text(
+            record, metric, cpi_available=cpi_available
+        )
     return pd.DataFrame(records)
 
 

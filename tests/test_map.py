@@ -12,8 +12,11 @@ import pytest
 from housing_analyzer.data.prices import parse_json_stat2
 from housing_analyzer.map import (
     METRIC_CHANGE_1Y,
+    METRIC_CHANGE_1Y_REAL,
     METRIC_PRICE,
     METRIC_SALES,
+    NO_CPI_HOVER,
+    NO_DATA_HOVER,
     build_choropleth_figure,
     format_hover_text,
     latest_quarter_with_data,
@@ -39,6 +42,17 @@ def sample_prices_frame() -> pd.DataFrame:
 def sample_boundaries() -> dict:
     with (FIXTURES / "boundaries_sample.geojson").open(encoding="utf-8") as handle:
         return json.load(handle)
+
+
+@pytest.fixture
+def cpi_df() -> pd.DataFrame:
+    """CPI covering only 2024Q4 (the quarter the price fixtures use), fully complete."""
+    return pd.DataFrame(
+        {
+            "month": pd.to_datetime(["2024-10-01", "2024-11-01", "2024-12-01"]),
+            "cpi": [102.0, 102.2, 102.4],
+        }
+    )
 
 
 def test_latest_quarter_with_data(sample_prices_frame):
@@ -69,13 +83,16 @@ def test_missing_metric_not_treated_as_zero():
     assert "0 EUR" not in hover
 
 
-def test_hover_includes_low_reliability_note(sample_prices_frame, sample_boundaries):
+def test_hover_includes_low_reliability_note(
+    sample_prices_frame, sample_boundaries, cpi_df
+):
     frame = prepare_map_dataframe(
         sample_prices_frame,
         sample_boundaries,
         "2024Q4",
         "2",
         METRIC_PRICE,
+        cpi_df=cpi_df,
     )
     low_rows = frame.loc[frame["reliability"] == "low"]
     if not low_rows.empty:
@@ -84,7 +101,7 @@ def test_hover_includes_low_reliability_note(sample_prices_frame, sample_boundar
 
 
 def test_prepare_map_dataframe_marks_missing_price_grey_candidates(
-    sample_prices_frame, sample_boundaries
+    sample_prices_frame, sample_boundaries, cpi_df
 ):
     frame = prepare_map_dataframe(
         sample_prices_frame,
@@ -92,31 +109,36 @@ def test_prepare_map_dataframe_marks_missing_price_grey_candidates(
         "2024Q4",
         "1",
         METRIC_PRICE,
+        cpi_df=cpi_df,
     )
     missing = frame.loc[frame["postal_code"] == "01200"]
     assert len(missing) == 1
     assert bool(missing.iloc[0]["missing"])
 
 
-def test_sales_metric_uses_trailing_sum(sample_prices_frame, sample_boundaries):
+def test_sales_metric_uses_trailing_sum(sample_prices_frame, sample_boundaries, cpi_df):
     frame = prepare_map_dataframe(
         sample_prices_frame,
         sample_boundaries,
         "2024Q4",
         "1",
         METRIC_SALES,
+        cpi_df=cpi_df,
     )
     row = frame.loc[frame["postal_code"] == "00100"].iloc[0]
     assert row[METRIC_SALES] == pytest.approx(50.0)
 
 
-def test_build_choropleth_figure_returns_figure(sample_prices_frame, sample_boundaries):
+def test_build_choropleth_figure_returns_figure(
+    sample_prices_frame, sample_boundaries, cpi_df
+):
     frame = prepare_map_dataframe(
         sample_prices_frame,
         sample_boundaries,
         "2024Q4",
         "all",
         METRIC_PRICE,
+        cpi_df=cpi_df,
     )
     fig = build_choropleth_figure(frame, sample_boundaries, METRIC_PRICE)
     assert fig.data
@@ -124,13 +146,14 @@ def test_build_choropleth_figure_returns_figure(sample_prices_frame, sample_boun
     assert "No data" in trace_names or "Areas with data" in trace_names
 
 
-def test_color_range_ignores_nan(sample_prices_frame, sample_boundaries):
+def test_color_range_ignores_nan(sample_prices_frame, sample_boundaries, cpi_df):
     frame = prepare_map_dataframe(
         sample_prices_frame,
         sample_boundaries,
         "2024Q4",
         "all",
         METRIC_PRICE,
+        cpi_df=cpi_df,
     )
     values = frame.loc[~frame["missing"], METRIC_PRICE]
     low, high = metric_color_range(values, METRIC_PRICE)
@@ -140,7 +163,7 @@ def test_color_range_ignores_nan(sample_prices_frame, sample_boundaries):
 
 
 def test_prepare_map_dataframe_does_not_compute_per_area_summaries(
-    sample_prices_frame, sample_boundaries, monkeypatch
+    sample_prices_frame, sample_boundaries, cpi_df, monkeypatch
 ):
     """The map must use the all-areas code path, not one full ranking per area."""
     import housing_analyzer.analysis.metrics as metrics
@@ -151,20 +174,25 @@ def test_prepare_map_dataframe_does_not_compute_per_area_summaries(
     monkeypatch.setattr(metrics, "summarize_area", boom)
     monkeypatch.setattr(metrics, "rank_percentile", boom)
     frame = prepare_map_dataframe(
-        sample_prices_frame, sample_boundaries, "2024Q4", "all", METRIC_PRICE
+        sample_prices_frame, sample_boundaries, "2024Q4", "all", METRIC_PRICE, cpi_df=cpi_df
     )
     assert not frame.empty
 
 
 def test_prepare_map_dataframe_matches_per_area_values(
-    sample_prices_frame, sample_boundaries
+    sample_prices_frame, sample_boundaries, cpi_df
 ):
     from housing_analyzer.analysis.metrics import summarize_area
     from housing_analyzer.map import resolve_building_type_label
 
     for code in ("all", "1", "2"):
         frame = prepare_map_dataframe(
-            sample_prices_frame, sample_boundaries, "2024Q4", code, METRIC_PRICE
+            sample_prices_frame,
+            sample_boundaries,
+            "2024Q4",
+            code,
+            METRIC_PRICE,
+            cpi_df=cpi_df,
         )
         label = resolve_building_type_label(
             sample_prices_frame, None if code == "all" else code
@@ -241,10 +269,10 @@ def test_postal_code_from_selection_handles_empty_and_odd_input():
 
 
 def test_each_map_trace_carries_only_its_own_areas(
-    sample_prices_frame, sample_boundaries
+    sample_prices_frame, sample_boundaries, cpi_df
 ):
     frame = prepare_map_dataframe(
-        sample_prices_frame, sample_boundaries, "2024Q4", "all", METRIC_PRICE
+        sample_prices_frame, sample_boundaries, "2024Q4", "all", METRIC_PRICE, cpi_df=cpi_df
     )
     fig = build_choropleth_figure(frame, sample_boundaries, METRIC_PRICE)
     for trace in fig.data:
@@ -254,3 +282,78 @@ def test_each_map_trace_carries_only_its_own_areas(
             for feature in trace.geojson["features"]
         }
         assert feature_codes == codes
+
+
+def test_prepare_map_dataframe_real_change_matches_hand_calculation(
+    sample_prices_frame, sample_boundaries
+):
+    """1y real change uses CPI-deflated prices, not the raw nominal ratio."""
+    prior_year_row = sample_prices_frame.loc[
+        (sample_prices_frame["postal_code"] == "00100")
+        & (sample_prices_frame["building_type"] == "1 — Blocks of flats, one-room flat")
+        & (sample_prices_frame["quarter"] == "2024Q4")
+    ].copy()
+    assert len(prior_year_row) == 1
+    prior_year_row["quarter"] = "2023Q4"
+    prior_year_row["price_per_sqm"] = 7000.0
+    extended = pd.concat([sample_prices_frame, prior_year_row], ignore_index=True)
+
+    # CPI: 100 in 2023Q4, 104 in 2024Q4 (base quarter) -> 4% inflation.
+    cpi = pd.DataFrame(
+        {
+            "month": pd.to_datetime(
+                [
+                    "2023-10-01",
+                    "2023-11-01",
+                    "2023-12-01",
+                    "2024-10-01",
+                    "2024-11-01",
+                    "2024-12-01",
+                ]
+            ),
+            "cpi": [100.0, 100.0, 100.0, 104.0, 104.0, 104.0],
+        }
+    )
+
+    frame = prepare_map_dataframe(
+        extended,
+        sample_boundaries,
+        "2024Q4",
+        "1",
+        METRIC_CHANGE_1Y_REAL,
+        cpi_df=cpi,
+    )
+    row = frame.loc[frame["postal_code"] == "00100"].iloc[0]
+    now_price = 7590.0
+    prior_real = 7000.0 * (104.0 / 100.0)
+    expected_pct = (now_price / prior_real - 1.0) * 100.0
+    assert row[METRIC_CHANGE_1Y_REAL] == pytest.approx(expected_pct)
+    assert not bool(row["missing"])
+
+
+def test_hover_notes_cpi_not_final_for_incomplete_quarter(
+    sample_prices_frame, sample_boundaries
+):
+    """Real-change metrics on a quarter with no final CPI shouldn't blame missing sales."""
+    # Only one month of 2024Q4 is present, so cpi_by_quarter drops it as incomplete.
+    cpi = pd.DataFrame(
+        {
+            "month": pd.to_datetime(
+                ["2023-10-01", "2023-11-01", "2023-12-01", "2024-10-01"]
+            ),
+            "cpi": [100.0, 100.0, 100.0, 104.0],
+        }
+    )
+
+    frame = prepare_map_dataframe(
+        sample_prices_frame,
+        sample_boundaries,
+        "2024Q4",
+        "1",
+        METRIC_CHANGE_1Y_REAL,
+        cpi_df=cpi,
+    )
+    row = frame.loc[frame["postal_code"] == "00100"].iloc[0]
+    assert bool(row["missing"])
+    assert NO_CPI_HOVER in row["hover"]
+    assert NO_DATA_HOVER not in row["hover"]
