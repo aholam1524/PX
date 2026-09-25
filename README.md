@@ -143,11 +143,17 @@ Happy path needs no manual labels. `main` is never auto-merged.
 
 Watch SDK-launched agents (Dev, Test, Fixer, Conflict) in Cursor: Agents → Filter → Source → SDK. Review, the fix pass, and the merge-into-`dev` step run in the **Claude review** workflow, not as Cursor cloud agents.
 
-### Claude fix pass
+### Claude review and fix pass
 
-After review, one **fix pass** may commit and push to the feature branch. It must not edit `.cursor/` or anything under `.asd-factory/`, and it must not create new files under `.github/`. It **may** edit a file under `.github/` only when that file is already part of the PR diff against `dev` (typical for factory wiring changes).
+Review findings use severity labels: each item starts with `[blocking]`, `[should fix]`, or `[minor]`, and the review opens with a one-line count per label.
 
-Each fix pass posts a **Fix pass result** PR comment: a table with one row per review finding (`fixed` with commit details, or `not fixed` with a reason), plus an HTML marker `<!-- factory:fix-result:all-addressed -->` or `<!-- factory:fix-result:open-findings -->`. The workflow also posts whether any commits were pushed (`Fix pass pushed N commit(s): …` or `Fix pass pushed no commits`). The fix-once marker is posted only after a **successful** fix pass; a failed fix pass leaves no marker so re-adding `agent-review` retries the fix.
+After review, one **fix pass** (Claude Sonnet 5, up to **80 turns**, **30**-minute job timeout; review stays at 40 turns) reads the review via `gh pr view --json comments,reviews`, fixes `[blocking]` then `[should fix]` (skips `[minor]` unless trivial), and **commits and pushes after each finding** so partial progress survives a turn limit. It runs targeted tests per fix and the full suite at most once at the end.
+
+It must not edit `.cursor/` or anything under `.asd-factory/`, and it must not create new files under `.github/`. It **never** edits files under `.github/workflows/` — the factory token cannot push workflow changes, and a shell-capable agent must not rewrite workflows. For workflow findings it posts a suggested `diff` in the **Fix pass result** comment (`not fixed: workflow file, patch suggested, apply manually`). It may edit `.github/scripts/` only when that script file is already in the PR diff.
+
+If the fix step fails with unpushed work, a **salvage** step saves the diff as artifact `fix-pass-partial-<PR number>`, restores any `.github/workflows/` edits to the remote branch state, runs pytest when `requirements.txt` exists, and may push the rest as `Fix pass (partial, turn limit reached)` when tests pass. It posts one comment on the PR with the outcome and run link. Automatic merge into `dev` is skipped on fix failure; no fix-once marker is posted.
+
+Each successful fix pass posts a **Fix pass result** PR comment: a table with one row per review finding (`fixed` with commit details, or `not fixed` with a reason), plus an HTML marker `<!-- factory:fix-result:all-addressed -->` or `<!-- factory:fix-result:open-findings -->`. The workflow also posts whether any commits were pushed (`Fix pass pushed N commit(s): …` or `Fix pass pushed no commits`). The fix-once marker is posted only after a **successful** fix pass; a failed fix pass leaves no marker so re-adding `agent-review` retries the fix.
 
 Repository variable **`FACTORY_BLOCK_ON_OPEN_FINDINGS`**: set to `true` under **Settings → Secrets and variables → Actions → Variables** to skip automatic merge into `dev` when the fix pass ends with `open-findings`. When unset or not `true` (default), merge proceeds as today and a one-line warning is added if findings were still open.
 
