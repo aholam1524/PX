@@ -713,6 +713,11 @@ with st.sidebar:
         "Quarter",
         options=quarters,
         index=quarters.index(default_quarter) if default_quarter in quarters else len(quarters) - 1,
+        help=(
+            "Defaults to the latest quarter with enough published prices across all "
+            "building types. A specific building type may still show as provisional "
+            "for this quarter if its own coverage is low."
+        ),
     )
     building_type_code = st.selectbox(
         "Building type",
