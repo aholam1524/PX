@@ -94,7 +94,7 @@ def _to_float(value: Any) -> float:
     return float(value)
 
 
-def _to_int(value: Any) -> int | pd._libs.missing.NAType:
+def _to_int(value: Any) -> Any:
     if _is_missing(value):
         return pd.NA
     return int(float(value))
