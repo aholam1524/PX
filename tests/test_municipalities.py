@@ -62,7 +62,9 @@ def test_parse_municipality_prices_leading_zeros_and_missing(sample_municipality
     assert hels_2025["transactions"] == 12
 
     vantaa_2025 = frame.loc[
-        (frame["municipality_code"] == "092") & (frame["year"] == 2025)
+        (frame["municipality_code"] == "092")
+        & (frame["year"] == 2025)
+        & (frame["building_type"].str.startswith("3"))
     ].iloc[0]
     assert pd.isna(vantaa_2025["price_per_sqm"])
     assert vantaa_2025["transactions"] == 3
