@@ -19,5 +19,8 @@ jobs:
             echo "No pytest files found; CI no-op pass"
             exit 0
           fi
+          if [[ -f requirements.txt ]]; then
+            python -m pip install -r requirements.txt
+          fi
           python -m pip install pytest -q
           python -m pytest
