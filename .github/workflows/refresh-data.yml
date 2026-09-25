@@ -10,6 +10,8 @@ permissions:
 jobs:
   refresh:
     runs-on: ubuntu-latest
+    env:
+      REFRESH_PR_BODY_PATH: ${{ runner.temp }}/refresh-pr-body.md
     steps:
       - name: Checkout dev
         uses: actions/checkout@v4
@@ -32,6 +34,7 @@ jobs:
         run: |
           python <<'PY'
           import json
+          import os
           from pathlib import Path
 
           path = Path("data/snapshot/manifest.json")
@@ -62,7 +65,7 @@ jobs:
           lines.append("")
           lines.append(f"**Total size:** {manifest.get('total_bytes', 0)} bytes")
           body = "\n".join(lines)
-          Path("refresh-pr-body.md").write_text(body, encoding="utf-8")
+          Path(os.environ["REFRESH_PR_BODY_PATH"]).write_text(body, encoding="utf-8")
           PY
 
       - name: Set refresh branch name
@@ -78,4 +81,6 @@ jobs:
           base: dev
           delete-branch: true
           title: "Refresh housing data snapshot"
-          body-path: refresh-pr-body.md
+          body-path: ${{ env.REFRESH_PR_BODY_PATH }}
+          add-paths: |
+            data/snapshot/**
