@@ -143,10 +143,20 @@ def test_flag_unusual_detects_spike():
     )
 
 
-def test_build_trend_chart_data_municipality_unavailable(sample_prices_frame, sample_boundaries):
+def test_build_trend_chart_data_municipality_unavailable(sample_prices_frame):
+    boundaries_without_muni = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "properties": {"postal_code": "00100", "nimi": "Helsinki keskusta"},
+                "geometry": {"type": "Point", "coordinates": [0, 0]},
+            }
+        ],
+    }
     data = build_trend_chart_data(
         sample_prices_frame,
-        sample_boundaries,
+        boundaries_without_muni,
         "00100",
         building_type=None,
     )

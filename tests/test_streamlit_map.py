@@ -30,7 +30,8 @@ def test_apptest_map_captions_and_full_range_checkbox(monkeypatch):
 
     checkbox_labels = [cb.label or "" for cb in at.checkbox]
     assert any("Use the full value range" in label for label in checkbox_labels)
+    assert any("Fill gaps with municipality values" in label for label in checkbox_labels)
 
     captions = _caption_text(at)
-    assert " areas have a published price for this selection." in captions
-    assert "Statistics Finland publishes prices only for areas with enough sales" in captions
+    assert "postal-code areas have their own price" in captions
+    assert "Municipality values are annual figures" in captions
