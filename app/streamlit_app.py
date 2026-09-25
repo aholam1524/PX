@@ -195,7 +195,11 @@ if selected:
     _render_summary_card(prices, selected, quarter, building_type_code)
 
 st.divider()
+footer_parts = [
+    "Data: Statistics Finland — "
+    "[Prices per square metre by postal code (PxWeb)](https://pxdata.stat.fi/PxWeb/api/v1/en/StatFin/ashi/13mt.px) "
+    "and [postal-code boundaries (WFS)](https://geo.stat.fi/geoserver/postialue/wfs)."
+]
 if manifest and manifest.get("fetch_date"):
-    st.caption(f"Data as of {manifest['fetch_date']}, source: Statistics Finland.")
-else:
-    st.caption("Data source: Statistics Finland.")
+    footer_parts.append(f" Snapshot fetched {manifest['fetch_date']}.")
+st.caption("".join(footer_parts))
