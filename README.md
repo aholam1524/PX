@@ -19,7 +19,11 @@ streamlit run app/streamlit_app.py
 
 ### Data
 
-Quarterly housing-company prices and transaction counts by postal-code area come from Statistics Finland’s table [“Prices per square meter of old dwellings in housing companies and numbers of transactions by postal code area, quarterly”](https://pxdata.stat.fi/PxWeb/api/v1/en/StatFin/ashi/13mt.px) (PxWeb API). The loader lives in `housing_analyzer/data/prices.py` (`load_prices()` / `fetch_prices()`). Parsed downloads are cached under `data/raw/` (git-ignored).
+Quarterly housing-company prices and transaction counts by postal-code area come from Statistics Finland’s table [“Prices per square meter of old dwellings in housing companies and numbers of transactions by postal code area, quarterly”](https://pxdata.stat.fi/PxWeb/api/v1/en/StatFin/ashi/13mt.px) (PxWeb API). The loader lives in `housing_analyzer/data/prices.py` (`load_prices()` / `fetch_prices()`).
+
+Postal-code area boundaries for the map come from Statistics Finland’s WFS service [`geo.stat.fi/geoserver/postialue/wfs`](https://geo.stat.fi/geoserver/postialue/wfs) (feature type `postialue:pno_2022`, matching the 2022-01-01 postal-code list used in the price table). The loader lives in `housing_analyzer/data/boundaries.py` (`load_boundaries()` / `join_prices_to_areas()`).
+
+Parsed downloads are cached under `data/raw/` (git-ignored).
 
 Nothing in this repository is investment advice.
 
