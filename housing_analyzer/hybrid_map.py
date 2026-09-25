@@ -818,7 +818,7 @@ def _build_hybrid_budget_figure(
 
     fig.update_layout(
         map_style="carto-positron",
-        margin={"l": 0, "r": 0, "t": 0, "b": 0},
+        margin=MAP_LAYOUT_MARGINS,
         legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "x": 0},
     )
     return fig
