@@ -65,10 +65,7 @@ def build_comparison_table(
     codes = [_normalize_code(c) for c in postal_codes]
     columns: dict[str, list[str]] = {}
     for code in codes:
-        label = code
-        if code in summaries.index:
-            label = code
-        columns[label] = _column_cells(
+        columns[code] = _column_cells(
             summaries, sales_by_area, code, include_real=include_real
         )
 

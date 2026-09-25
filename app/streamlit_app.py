@@ -135,16 +135,22 @@ def _init_compare_session_state() -> None:
         st.session_state.compare_postal_codes = []
 
 
-def _add_to_compare(postal_code: str) -> None:
+def _add_to_compare(postal_code: str) -> bool:
     code = str(postal_code).zfill(5)
     current: list[str] = list(st.session_state.compare_postal_codes)
     if code in current:
-        return
+        return False
     if len(current) >= MAX_COMPARE_AREAS:
         st.warning(f"Comparison is limited to {MAX_COMPARE_AREAS} areas. Remove one to add another.")
-        return
+        return False
     current.append(code)
     st.session_state.compare_postal_codes = current
+    # The Compare tab's multiselect owns its own widget state once created, so its
+    # `default=` is ignored on reruns; update it directly or this add is lost the
+    # moment `_render_compare_tab` re-renders the multiselect later in this run.
+    if "compare_multiselect" in st.session_state:
+        st.session_state.compare_multiselect = current
+    return True
 
 
 def _format_compare_option(catalog: pd.DataFrame, code: str) -> str:
@@ -231,6 +237,8 @@ def _render_compare_tab(
 
     st.markdown("### Similar areas")
     st.caption(similar_areas_explanation())
+    if st.session_state.get("similar_for") not in selected:
+        st.session_state.similar_for = selected[0]
     similar_for = st.selectbox(
         "Similar areas for",
         options=selected,
@@ -342,8 +350,8 @@ def _render_detail_panel(
     st.caption(rel_text)
 
     if st.button("Add to comparison", key=f"add_compare_{code}"):
-        _add_to_compare(code)
-        st.success(f"{code} added to comparison.")
+        if _add_to_compare(code):
+            st.success(f"{code} added to comparison.")
 
     trend_data = _cached_trend_chart_data(
         prices,
