@@ -50,3 +50,109 @@ def test_apptest_detail_panel_with_fixtures(monkeypatch):
     ]
     joined = " ".join(chunks)
     assert "00100" in joined or "Area detail" in joined
+
+
+def test_apptest_compare_tab_with_fixtures(monkeypatch):
+    apptest_mod = importlib.util.find_spec("streamlit.testing.v1")
+    if apptest_mod is None:
+        pytest.skip("streamlit.testing.v1.AppTest not available in this Streamlit version")
+
+    monkeypatch.setenv("HOUSING_USE_FIXTURES", "1")
+
+    from streamlit.testing.v1 import AppTest
+
+    at = AppTest.from_file(str(STREAMLIT_APP))
+    at.run(timeout=60)
+    assert not at.exception
+
+    if not at.tabs:
+        pytest.skip("AppTest tabs not available in this Streamlit version")
+
+    at.tabs[1].run(timeout=60)
+    assert not at.exception
+
+    body = " ".join(getattr(el, "value", "") or "" for el in at.subheader)
+    assert "Compare" in body or any(
+        "Compare areas" in (getattr(el, "value", "") or "") for el in at.subheader
+    )
+
+
+def test_apptest_similar_for_selection_survives_deselecting_area(monkeypatch):
+    apptest_mod = importlib.util.find_spec("streamlit.testing.v1")
+    if apptest_mod is None:
+        pytest.skip("streamlit.testing.v1.AppTest not available in this Streamlit version")
+
+    monkeypatch.setenv("HOUSING_USE_FIXTURES", "1")
+
+    from streamlit.testing.v1 import AppTest
+
+    at = AppTest.from_file(str(STREAMLIT_APP))
+    at.run(timeout=60)
+    assert not at.exception
+
+    if not at.tabs:
+        pytest.skip("AppTest tabs not available in this Streamlit version")
+
+    at.tabs[1].run(timeout=60)
+    assert not at.exception
+
+    multiselects = [ms for ms in at.multiselect if ms.key == "compare_multiselect"]
+    if not multiselects:
+        pytest.skip("compare multiselect not available in this Streamlit version")
+
+    multiselects[0].set_value(["00100", "00120"]).run(timeout=60)
+    assert not at.exception
+
+    similar_boxes = [sb for sb in at.selectbox if sb.key == "similar_for"]
+    assert similar_boxes
+    similar_boxes[0].set_value("00120").run(timeout=60)
+    assert not at.exception
+    assert [sb for sb in at.selectbox if sb.key == "similar_for"][0].value == "00120"
+
+    # Deselecting the area that "similar_for" points to must not crash the app,
+    # and the widget must fall back to an area still in the comparison.
+    compare_ms = [ms for ms in at.multiselect if ms.key == "compare_multiselect"][0]
+    compare_ms.set_value(["00100"]).run(timeout=60)
+    assert not at.exception
+
+    similar_box = [sb for sb in at.selectbox if sb.key == "similar_for"][0]
+    assert similar_box.value == "00100"
+
+
+def test_apptest_add_to_compare_duplicate_does_not_show_success(monkeypatch):
+    apptest_mod = importlib.util.find_spec("streamlit.testing.v1")
+    if apptest_mod is None:
+        pytest.skip("streamlit.testing.v1.AppTest not available in this Streamlit version")
+
+    monkeypatch.setenv("HOUSING_USE_FIXTURES", "1")
+
+    from streamlit.testing.v1 import AppTest
+
+    at = AppTest.from_file(str(STREAMLIT_APP))
+    at.run(timeout=60)
+    assert not at.exception
+
+    if at.text_input:
+        at.text_input[0].set_value("00100").run(timeout=60)
+    if at.button:
+        for button in at.button:
+            if "Show selected area" in (button.label or ""):
+                button.click().run(timeout=60)
+                break
+
+    add_buttons = [b for b in at.button if (b.key or "").startswith("add_compare_")]
+    if not add_buttons:
+        pytest.skip("Add to comparison button not available in this Streamlit version")
+
+    add_buttons[0].click().run(timeout=60)
+    assert not at.exception
+    assert any("added to comparison" in (getattr(el, "value", "") or "") for el in at.success)
+    assert at.session_state["compare_postal_codes"] == ["00100"]
+
+    # Clicking again while already in the comparison list must not show a second
+    # (misleading) success toast, and must not add a duplicate entry.
+    add_buttons = [b for b in at.button if (b.key or "").startswith("add_compare_")]
+    add_buttons[0].click().run(timeout=60)
+    assert not at.exception
+    assert not any("added to comparison" in (getattr(el, "value", "") or "") for el in at.success)
+    assert at.session_state["compare_postal_codes"] == ["00100"]
