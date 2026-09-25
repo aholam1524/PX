@@ -53,7 +53,7 @@ METRIC_UNITS: dict[str, str] = {
     METRIC_CHANGE_1Y_REAL: "%",
     METRIC_CHANGE_5Y_REAL: "%",
     METRIC_SALES: "sales",
-    METRIC_PRICE_TO_INCOME: "m² per EUR income",
+    METRIC_PRICE_TO_INCOME: "years income / m²",
 }
 
 _PCT_CHANGE_METRICS = frozenset(

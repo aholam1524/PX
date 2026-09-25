@@ -13,6 +13,9 @@ from housing_analyzer.analysis.relationships import (
     price_to_income_ratio,
 )
 from housing_analyzer.data.demographics import (
+    MEASURE_POPULATION,
+    MEASURES_AGE_65_PLUS,
+    _assemble_demographics,
     attach_demographics_to_summaries,
     join_demographics_to_postal_codes,
     load_demographics,
@@ -74,6 +77,28 @@ def test_attach_demographics_to_summaries():
     enriched = attach_demographics_to_summaries(summaries, demo)
     assert enriched.loc["00100", "median_income_eur"] == 45000.0
     assert np.isnan(enriched.loc["00200", "median_income_eur"])
+
+
+def test_assemble_demographics_partial_age_bands_excluded():
+    population = pd.DataFrame(
+        {
+            "postal_code": ["00100"] * (1 + len(MEASURES_AGE_65_PLUS))
+            + ["00200"] * len(MEASURES_AGE_65_PLUS),
+            "measure": [MEASURE_POPULATION, *MEASURES_AGE_65_PLUS]
+            + [MEASURE_POPULATION, *MEASURES_AGE_65_PLUS[:-1]],
+            "value": [1000.0] + [20.0] * len(MEASURES_AGE_65_PLUS)
+            + [1000.0] + [20.0] * (len(MEASURES_AGE_65_PLUS) - 1),
+        }
+    )
+    empty = pd.DataFrame(columns=["postal_code", "measure", "value"])
+    frame = _assemble_demographics(population, empty, empty, data_year="2024")
+
+    complete = frame.loc[frame["postal_code"] == "00100"].iloc[0]
+    partial = frame.loc[frame["postal_code"] == "00200"].iloc[0]
+    assert complete["share_age_65_plus"] == pytest.approx(
+        20.0 * len(MEASURES_AGE_65_PLUS) / 1000.0
+    )
+    assert np.isnan(partial["share_age_65_plus"])
 
 
 def test_prepare_relationships_frame_excludes_unreliable(monkeypatch):

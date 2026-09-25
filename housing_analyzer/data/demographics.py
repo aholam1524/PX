@@ -237,15 +237,13 @@ def _assemble_demographics(
     rows: list[dict[str, Any]] = []
     for code in codes:
         pop_total = _measure_value(pop, MEASURE_POPULATION, code)
-        age_counts: list[float] = []
-        for measure in MEASURES_AGE_65_PLUS:
-            val = _measure_value(pop, measure, code)
-            if pd.notna(val):
-                age_counts.append(float(val))
-        age_65_plus = sum(age_counts) if age_counts else float("nan")
+        age_values = [_measure_value(pop, measure, code) for measure in MEASURES_AGE_65_PLUS]
+        age_65_plus = (
+            sum(age_values) if all(pd.notna(val) for val in age_values) else float("nan")
+        )
 
         share_65 = float("nan")
-        if pd.notna(pop_total) and pop_total > 0 and age_counts:
+        if pd.notna(pop_total) and pop_total > 0 and pd.notna(age_65_plus):
             share_65 = age_65_plus / pop_total
 
         median_income = _measure_value(inc, MEASURE_MEDIAN_INCOME, code)
