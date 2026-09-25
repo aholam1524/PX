@@ -40,6 +40,14 @@ def snapshot_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(
         data_paths, "DEMOGRAPHICS_SNAPSHOT_FILE", snap / "demographics.csv.gz"
     )
+    monkeypatch.setattr(
+        data_paths, "MUNICIPALITY_PRICES_SNAPSHOT_FILE", snap / "municipality_prices.csv.gz"
+    )
+    monkeypatch.setattr(
+        data_paths,
+        "MUNICIPALITY_BOUNDARIES_SNAPSHOT_FILE",
+        snap / "municipalities.geojson.gz",
+    )
     return snap
 
 
@@ -67,6 +75,8 @@ def test_build_manifest_fields():
     assert manifest["fetch_date"]
     assert manifest["total_bytes"] == 3100
     assert "demographics.csv.gz" in manifest["files"]
+    assert "municipality_prices.csv.gz" in manifest["files"]
+    assert "municipalities.geojson.gz" in manifest["files"]
     assert manifest["files"]["prices.csv.gz"]["rows"] == 10
     assert manifest["files"]["boundaries.geojson.gz"]["features"] == 3
     assert "boundary_edition" in manifest["files"]["boundaries.geojson.gz"]
