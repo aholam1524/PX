@@ -38,8 +38,9 @@ BUILDING_TYPE_LABELS = {
 
 _MISSING_STRINGS = frozenset({"..", "-", ""})
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-CACHE_DIR = _REPO_ROOT / "data" / "raw"
+from housing_analyzer.data import paths as data_paths
+
+CACHE_DIR = data_paths.RAW_DIR
 CACHE_FILE = CACHE_DIR / "housing_prices.pkl"
 
 _QUARTER_RE = re.compile(r"^(\d{4})Q([1-4])")
@@ -371,9 +372,31 @@ def fetch_prices(
     )
 
 
+def _read_prices_snapshot(path: Path | None = None) -> pd.DataFrame:
+    path = path or data_paths.PRICES_SNAPSHOT_FILE
+    frame = pd.read_csv(path, compression="gzip")
+    frame["postal_code"] = frame["postal_code"].astype(str).str.zfill(5)
+    frame["period_end"] = pd.to_datetime(frame["period_end"])
+    frame["transactions"] = frame["transactions"].astype("Int64")
+    return frame[_column_order()]
+
+
+def _snapshot_prices_available() -> bool:
+    return data_paths.PRICES_SNAPSHOT_FILE.is_file()
+
+
 def load_prices(*, refresh: bool = False) -> pd.DataFrame:
-    """Load housing prices from cache, fetching from PxWeb when needed."""
-    if CACHE_FILE.exists() and not refresh:
+    """Load housing prices from snapshot, cache, or PxWeb."""
+    if refresh:
+        frame = fetch_prices(refresh=True)
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        frame.to_pickle(CACHE_FILE)
+        return frame
+
+    if _snapshot_prices_available():
+        return _read_prices_snapshot()
+
+    if CACHE_FILE.exists():
         return pd.read_pickle(CACHE_FILE)
 
     frame = fetch_prices()

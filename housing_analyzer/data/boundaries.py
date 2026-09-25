@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 import json
 import logging
 from collections.abc import Callable, Mapping
@@ -24,8 +25,9 @@ NAME_PROPERTY = "nimi"
 
 DEFAULT_SIMPLIFY_TOLERANCE = 0.001
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-CACHE_DIR = _REPO_ROOT / "data" / "raw"
+from housing_analyzer.data import paths as data_paths
+
+CACHE_DIR = data_paths.RAW_DIR
 CACHE_FILE = CACHE_DIR / "housing_boundaries.geojson"
 EDITION_FILE = CACHE_DIR / "housing_boundaries_edition.txt"
 
@@ -120,14 +122,37 @@ def fetch_boundaries(
     return simplify_geojson(raw)
 
 
+def _read_boundaries_snapshot(path: Path | None = None) -> dict[str, Any]:
+    path = path or data_paths.BOUNDARIES_SNAPSHOT_FILE
+    with gzip.open(path, "rt", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def _snapshot_boundaries_available() -> bool:
+    return data_paths.BOUNDARIES_SNAPSHOT_FILE.is_file()
+
+
 def load_boundaries(
     *,
     refresh: bool = False,
     simplify_tolerance: float = DEFAULT_SIMPLIFY_TOLERANCE,
     fetch_geojson: Callable[[str], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Load simplified boundaries from cache, fetching from WFS when needed."""
-    if CACHE_FILE.exists() and EDITION_FILE.exists() and not refresh:
+    """Load simplified boundaries from snapshot, cache, or WFS."""
+    if refresh:
+        collection = fetch_boundaries(fetch_geojson=fetch_geojson)
+        if simplify_tolerance != DEFAULT_SIMPLIFY_TOLERANCE:
+            collection = simplify_geojson(collection, tolerance=simplify_tolerance)
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        with CACHE_FILE.open("w", encoding="utf-8") as handle:
+            json.dump(collection, handle, ensure_ascii=False)
+        EDITION_FILE.write_text(f"{FEATURE_TYPE}\n{EDITION_LABEL}\n", encoding="utf-8")
+        return collection
+
+    if _snapshot_boundaries_available():
+        return _read_boundaries_snapshot()
+
+    if CACHE_FILE.exists() and EDITION_FILE.exists():
         with CACHE_FILE.open(encoding="utf-8") as handle:
             return json.load(handle)
 
