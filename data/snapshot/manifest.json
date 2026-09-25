@@ -27,23 +27,42 @@
         "income": "https://pxdata.stat.fi/PxWeb/api/v1/en/Postinumeroalueittainen_avoin_tieto/uusin/12f1.px",
         "education": "https://pxdata.stat.fi/PxWeb/api/v1/en/Postinumeroalueittainen_avoin_tieto/uusin/12ez.px"
       },
-      "data_year": "2024",
-      "variable_codes": {
-        "population": "he_vakiy",
-        "age_65_plus_bands": [
-          "he_65_69",
-          "he_70_74",
-          "he_75_79",
-          "he_80_84",
-          "he_85_"
-        ],
-        "median_income": "hr_mtu",
-        "higher_education": "ko_yl_kork",
-        "adults_18_plus": "ko_ika18y",
-        "postal": "postinumeroalue_4_20260101",
-        "year": "timeperiod_y"
-      }
+      "data_year": "2024"
+    },
+    "municipality_prices.csv.gz": {
+      "bytes": 127094,
+      "rows": 18060,
+      "source_url": "https://pxdata.stat.fi/PxWeb/api/v1/en/StatFin/ashi/13mx.px",
+      "table_id": "13mx.px",
+      "years": [
+        2006,
+        2007,
+        2008,
+        2009,
+        2010,
+        2011,
+        2012,
+        2013,
+        2014,
+        2015,
+        2016,
+        2017,
+        2018,
+        2019,
+        2020,
+        2021,
+        2022,
+        2023,
+        2024,
+        2025
+      ]
+    },
+    "municipalities.geojson.gz": {
+      "bytes": 733872,
+      "features": 309,
+      "source_url": "https://geo.stat.fi/geoserver/postialue/wfs?service=WFS&version=2.0.0&request=GetFeature&typeName=postialue:pno_2022&outputFormat=application%2Fjson&srsName=EPSG%3A4326",
+      "derived_from": "boundaries.geojson.gz"
     }
   },
-  "total_bytes": 4533803
+  "total_bytes": 5394769
 }

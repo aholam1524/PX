@@ -1,0 +1,91 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "posti_alue": "00100",
+        "postal_code": "00100",
+        "kunta": "091",
+        "kuntanro": 91,
+        "nimi": "Helsinki west"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [24.94, 60.16],
+            [24.95, 60.16],
+            [24.95, 60.17],
+            [24.94, 60.17],
+            [24.94, 60.16]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "posti_alue": "00120",
+        "postal_code": "00120",
+        "kunta": "091",
+        "kuntanro": 91,
+        "nimi": "Helsinki east"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [24.96, 60.16],
+            [24.97, 60.16],
+            [24.97, 60.17],
+            [24.96, 60.17],
+            [24.96, 60.16]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "posti_alue": "01200",
+        "postal_code": "01200",
+        "kunta": "092",
+        "kuntanro": 92,
+        "nimi": "Vantaa"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [25.01, 60.29],
+            [25.02, 60.29],
+            [25.02, 60.3],
+            [25.01, 60.3],
+            [25.01, 60.29]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "posti_alue": "88888",
+        "postal_code": "88888",
+        "nimi": "Missing municipality"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [22.0, 63.0],
+            [22.01, 63.0],
+            [22.01, 63.01],
+            [22.0, 63.01],
+            [22.0, 63.0]
+          ]
+        ]
+      }
+    }
+  ]
+}
