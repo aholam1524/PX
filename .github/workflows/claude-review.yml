@@ -64,6 +64,7 @@ jobs:
             printf '### Description\n\n%s\n' "$PR_BODY"
             printf '\n\n## Review efficiency\n\n'
             printf '%s\n' 'Start with `gh pr diff` and `gh pr view` for this PR. Read only the files that changed; do not explore the rest of the repository. Post **one** review comment (`gh pr review --comment` or `gh pr comment`) as soon as your analysis is done, well before you run out of turns. If you have no findings, still post one comment saying so.'
+            printf '%s\n' 'Every finding must start with exactly one severity label: `[blocking]`, `[should fix]`, or `[minor]`. Open the review with one line counting findings per label, for example: **Findings:** 1 blocking, 2 should fix, 0 minor.'
           } > /tmp/review-prompt.md
           delimiter="$(openssl rand -hex 16)"
           {
@@ -160,11 +161,17 @@ jobs:
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
           set -euo pipefail
-          GITHUB_CHANGED="$(git diff --name-only origin/dev...HEAD | grep '^\.github/' || true)"
+          SCRIPTS_CHANGED="$(git diff --name-only origin/dev...HEAD | grep '^\.github/scripts/' || true)"
           cat > /tmp/fix-prompt.md <<'EOF'
           You are applying one automated fix pass after Claude review on this pull request.
 
-          Read the review comments on this PR (conversation comments and inline review comments). Apply only fixes that are clearly correct and in scope of the ticket. Add or update tests where a fix changes behavior. Run the repository's tests if any exist. Commit and push to the PR's branch only when you make changes.
+          Read the review with `gh pr view <number> --json comments,reviews` (the review is posted as a PR review, not only as a conversation comment). Use only that review plus the changed code; do not explore beyond the files this PR changes.
+
+          Fix findings in priority order: all `[blocking]` first, then `[should fix]`. Skip `[minor]` findings and performance rewrites unless the change is trivial and safe.
+
+          After **each** finding you fix: run only the tests relevant to that change (for example `python -m pytest tests/test_x.py -q`), then **commit and push** with a short message that names the finding. If a push is rejected, note it and continue with the remaining findings instead of stopping. Run the full test suite at most once, at the end, if you need it.
+
+          Stop working on new findings by about turn 60 and post the required **Fix pass result** comment listing what you fixed and what you left.
 
           If the review found nothing important, or there is nothing safe to fix, make no commit.
 
@@ -172,26 +179,26 @@ jobs:
           - Work on the existing PR head branch only; do not create a new branch.
           - Do not open pull requests, merge, or change labels.
           - Do not edit `.cursor/` or anything under `.asd-factory/` (ASD factory).
-          - Do not create new workflow files or other new files under `.github/`.
-          - You may edit a file under `.github/` only if it appears in the "GitHub files changed by this PR" list below; never edit other `.github/` paths.
+          - Do not create new files under `.github/`.
+          - **Never** edit anything under `.github/workflows/` (the push token cannot update workflow files). For a finding that concerns a workflow file under `.github/workflows/`, do not change the file; instead include the fix in the **Fix pass result** comment as a suggested patch (one fenced `diff` block per finding, with the file path and a short explanation) and mark the finding `not fixed: workflow file, patch suggested, apply manually`. Do not count that as a fix-pass failure.
+          - You may edit a file under `.github/scripts/` only if it appears in the "GitHub scripts changed by this PR" list below.
           - Use `git add`, `git commit`, and `git push` only for your fixes on this branch.
-          - You may use `gh pr view` and `gh pr comment` to read the PR.
-          - Read the review comments first, make the fixes, then finish with the Fix pass result comment (required).
+          - You may use `gh pr view` and `gh pr comment` to read and comment on the PR.
 
           ## Fix pass result comment (required)
 
-          Before you stop, post **one** PR comment (`gh pr comment`) whose body starts with the heading `## Fix pass result` and includes a markdown table with one row per review finding (or state clearly if the review had no findings). Columns: finding (short summary), status (`fixed` or `not fixed`), details (commit SHA or reason such as "out of scope" or "disagree").
+          Before you stop, post **one** PR comment (`gh pr comment`) whose body starts with the heading `## Fix pass result` and includes a markdown table with one row per review finding (or state clearly if the review had no findings). Columns: finding (short summary), status (`fixed` or `not fixed`), details (commit SHA, reason such as "out of scope" or "disagree", or for workflow files the suggested `diff` patch).
 
           End that comment with **exactly one** of these HTML markers on its own line:
-          - `<!-- factory:fix-result:all-addressed -->` when every finding is fixed or legitimately not fixed with no remaining actionable issues.
+          - `<!-- factory:fix-result:all-addressed -->` when every finding is fixed or legitimately not fixed (including workflow findings with a suggested patch) with no remaining actionable issues.
           - `<!-- factory:fix-result:open-findings -->` when any finding remains unaddressed and should block merge if the repo is configured to block on open findings.
           EOF
           {
-            printf '\n\n## GitHub files changed by this PR\n\n'
-            if [[ -z "$GITHUB_CHANGED" ]]; then
-              printf '_None — do not edit any file under `.github/`._\n'
+            printf '\n\n## GitHub scripts changed by this PR\n\n'
+            if [[ -z "$SCRIPTS_CHANGED" ]]; then
+              printf '_None — do not edit any file under `.github/scripts/`._\n'
             else
-              printf '%s\n' "$GITHUB_CHANGED"
+              printf '%s\n' "$SCRIPTS_CHANGED"
             fi
             printf '\n\n## Pull request\n\n'
             printf 'Number: %s\n' "$PR_NUMBER"
@@ -219,6 +226,92 @@ jobs:
             --model claude-sonnet-5
             --max-turns 80
             --allowedTools "Read,Edit,Write,Glob,Grep,Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(pytest:*),Bash(python:*),Bash(npm:*),Bash(npx:*),Bash(make:*),Bash(cargo:*),Bash(go test:*),Bash(go:*)"
+
+      - name: Salvage partial fix pass work
+        if: always() && steps.marker.outputs.already_fixed != 'true' && steps.claude_fix.conclusion == 'failure'
+        id: salvage
+        continue-on-error: true
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          RUN_ID: ${{ github.run_id }}
+          SERVER_URL: ${{ github.server_url }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          RUN_URL="${SERVER_URL}/${REPOSITORY}/actions/runs/${RUN_ID}"
+          SALVAGE_MARKER="<!-- factory:fix-salvage:${RUN_ID} -->"
+          COMMENTS="$(gh pr view "$PR_NUMBER" --json comments --jq '.comments[].body')"
+          if grep -Fq "$SALVAGE_MARKER" <<< "$COMMENTS"; then
+            echo "Salvage comment already posted for this run; skipping."
+            exit 0
+          fi
+
+          git fetch origin "$HEAD_REF"
+          HAS_WORK=false
+          if [[ -n "$(git status --porcelain)" ]]; then
+            HAS_WORK=true
+          fi
+          AHEAD="$(git rev-list --count "origin/${HEAD_REF}"..HEAD 2>/dev/null || echo 0)"
+          if [[ "$AHEAD" -gt 0 ]]; then
+            HAS_WORK=true
+          fi
+
+          ARTIFACT_NOTE="nothing to save (no unpushed commits or uncommitted changes)"
+          PUSHED_NOTE="no partial commits were pushed"
+          if [[ "$HAS_WORK" == "true" ]]; then
+            {
+              git diff "origin/${HEAD_REF}"...HEAD || true
+              git diff || true
+            } > /tmp/fix-pass-partial.patch
+            if [[ -s /tmp/fix-pass-partial.patch ]]; then
+              echo "has_artifact=true" >> "$GITHUB_OUTPUT"
+              ARTIFACT_NOTE="partial diff saved as workflow artifact \`fix-pass-partial-${PR_NUMBER}\` (download from this run)"
+            else
+              ARTIFACT_NOTE="no diff content to save"
+            fi
+
+            if [[ -d .github/workflows ]]; then
+              git checkout "origin/${HEAD_REF}" -- .github/workflows/ || true
+            fi
+
+            if [[ -f requirements.txt ]]; then
+              python -m pip install -r requirements.txt pytest -q
+              if python -m pytest -q; then
+                if [[ -n "$(git status --porcelain)" ]]; then
+                  git add -A
+                  git commit -m "Fix pass (partial, turn limit reached)"
+                  if git push origin "HEAD:${HEAD_REF}"; then
+                    PUSHED_NOTE="partial fixes were committed and pushed (workflow file edits excluded)"
+                  else
+                    PUSHED_NOTE="tests passed but push failed; see artifact for the diff"
+                  fi
+                fi
+              else
+                PUSHED_NOTE="tests failed after excluding workflow edits; nothing was pushed"
+              fi
+            else
+              if [[ -n "$(git status --porcelain)" ]]; then
+                git add -A
+                git commit -m "Fix pass (partial, turn limit reached)"
+                if git push origin "HEAD:${HEAD_REF}"; then
+                  PUSHED_NOTE="partial fixes were committed and pushed (workflow file edits excluded)"
+                else
+                  PUSHED_NOTE="push failed; see artifact for the diff"
+                fi
+              fi
+            fi
+          fi
+
+          BODY="$(printf '%s\n\nFactory: the **Claude fix pass** stopped early (turn limit or error).\n\n- Partial work: %s\n- Salvage: %s\n- Run: %s\n\nRe-add the **agent-review** label to retry the fix pass, or merge manually if the PR is ready.' "$SALVAGE_MARKER" "$PUSHED_NOTE" "$ARTIFACT_NOTE" "$RUN_URL")"
+          gh pr comment "$PR_NUMBER" --body "$BODY"
+
+      - name: Upload fix pass partial artifact
+        if: always() && steps.salvage.outputs.has_artifact == 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: fix-pass-partial-${{ github.event.pull_request.number }}
+          path: /tmp/fix-pass-partial.patch
 
       - name: Post fix marker
         if: steps.marker.outputs.already_fixed != 'true' && steps.claude_fix.outcome == 'success'
@@ -374,7 +467,11 @@ jobs:
           FAILED_LIST="$(IFS=', '; echo "${FAILED_JOBS[*]}")"
           RUN_URL="${SERVER_URL}/${REPOSITORY}/actions/runs/${RUN_ID}"
 
-          BODY="$(printf '%s\n\nFactory: the **Claude review** workflow failed.\n\nFailed jobs: %s\nRun: %s\n\nThe owner needs to look at the failure. Add the **agent-review** label again to retry. If the **fix** job failed, no fix-once marker was posted, so the fix pass will run again. If a previous run completed the fix job successfully, the fix-once marker prevents a second fix pass until you remove that marker comment or merge without it.' "$MARKER" "$FAILED_LIST" "$RUN_URL")"
+          FIX_NOTE=""
+          if [[ "$NEEDS_FIX" == "failure" ]]; then
+            FIX_NOTE=$'\n\nIf the **fix** job hit the turn limit or another error, check the run for a **Salvage partial fix pass work** step: partial commits may have been pushed after tests, or only saved as artifact \`fix-pass-partial-<PR>\` (workflow file edits are never pushed). A salvage comment on the PR describes the outcome. No fix-once marker is posted on fix failure, so re-adding **agent-review** retries the fix pass.'
+          fi
+          BODY="$(printf '%s\n\nFactory: the **Claude review** workflow failed.\n\nFailed jobs: %s\nRun: %s\n\nThe owner needs to look at the failure. Add the **agent-review** label again to retry. If the **fix** job failed, no fix-once marker was posted, so the fix pass will run again. If a previous run completed the fix job successfully, the fix-once marker prevents a second fix pass until you remove that marker comment or merge without it.%s' "$MARKER" "$FAILED_LIST" "$RUN_URL" "$FIX_NOTE")"
           gh pr comment "$PR_NUMBER" --body "$BODY"
 
       - name: Mark linked issue factory-blocked
