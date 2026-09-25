@@ -1,0 +1,71 @@
+name: Claude review
+
+on:
+  pull_request:
+    types: [labeled]
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  id-token: write
+
+jobs:
+  review:
+    if: >
+      github.event.action == 'labeled' &&
+      github.event.label.name == 'agent-review' &&
+      github.event.pull_request.base.ref == 'dev'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Checkout ASD factory
+        uses: actions/checkout@v4
+        with:
+          repository: aholam1524/ASD
+          ref: main
+          path: .asd-factory
+          token: ${{ secrets.FACTORY_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Build review prompt
+        id: build-prompt
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          {
+            cat .asd-factory/factory/prompts/review.md
+            printf '\n\n## Pull request\n\n'
+            printf 'Number: %s\n' "$PR_NUMBER"
+            printf 'Title: %s\n' "$PR_TITLE"
+            printf 'URL: %s\n\n' "$PR_URL"
+            printf '### Description\n\n%s\n' "$PR_BODY"
+          } > /tmp/review-prompt.md
+          delimiter="$(openssl rand -hex 16)"
+          {
+            echo "prompt<<${delimiter}"
+            cat /tmp/review-prompt.md
+            echo "${delimiter}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Run Claude review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: ${{ steps.build-prompt.outputs.prompt }}
+          claude_args: |
+            --model claude-sonnet-5
+            --max-turns 15
+            --allowedTools "Read,Glob,Grep,Bash(gh pr comment:*),Bash(gh pr review:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
