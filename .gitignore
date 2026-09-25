@@ -219,3 +219,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Housing analyzer local caches and downloaded raw data
+.cache/
+data/raw/
