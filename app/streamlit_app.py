@@ -15,6 +15,7 @@ import streamlit as st
 
 from housing_analyzer.analysis.compare import (
     area_catalog,
+    area_search_options,
     build_compare_chart_data,
     build_compare_figure,
     build_comparison_table,
@@ -126,6 +127,7 @@ from housing_analyzer.panel import (
     market_activity_panel_caption,
     MARKET_ACTIVITY_METRIC_HELP,
     municipality_name_from_prices,
+    postal_code_name_lookup,
     quarterly_area_prices,
     quarterly_transaction_counts,
     reliability_explanation,
@@ -279,6 +281,15 @@ def _format_building_type_display(
     return label or dict(BUILDING_TYPE_CHOICES).get(building_type_code, building_type_code)
 
 
+def _on_map_area_search_change() -> None:
+    code = st.session_state.get("map_area_search")
+    if not code:
+        return
+    st.session_state.selected_postal_code = code
+    st.session_state.selected_map_level = "postal"
+    st.session_state._last_map_selected_code = code
+
+
 def _init_compare_session_state() -> None:
     if "compare_postal_codes" not in st.session_state:
         st.session_state.compare_postal_codes = []
@@ -302,10 +313,8 @@ def _add_to_compare(postal_code: str) -> bool:
     return True
 
 
-def _format_compare_option(catalog: pd.DataFrame, code: str) -> str:
-    row = catalog.loc[catalog["postal_code"] == code]
-    name = str(row["area_name"].iloc[0]) if not row.empty else ""
-    return f"{code} — {name}".strip(" —")
+def _compare_option_labels(catalog: pd.DataFrame) -> dict[str, str]:
+    return dict(area_search_options(catalog))
 
 
 def _affordability_sidebar_inputs() -> dict[str, float | bool | str]:
@@ -830,11 +839,12 @@ def _render_my_home_tab(
     if search_hits:
         options = search_hits + [c for c in options if c not in search_hits]
     default_index = options.index(default_code) if default_code in options else 0
+    option_labels = _compare_option_labels(catalog)
     postal_code = st.selectbox(
         "Postal code",
         options=options,
         index=default_index,
-        format_func=lambda c: _format_compare_option(catalog, c),
+        format_func=lambda c: option_labels.get(c, c),
         key="my_home_postal",
     )
 
@@ -994,25 +1004,26 @@ def _render_compare_tab(
         f"Quarter **{quarter}** · {_format_building_type_display(prices, building_type_code)}"
     )
 
-    search_query = st.text_input(
-        "Search by postal code or area name",
-        placeholder="e.g. 00100 or Punavuori",
-        key="compare_search",
+    postal_names = postal_code_name_lookup(prices)
+    catalog_for_search = catalog.assign(
+        municipality=catalog["postal_code"].map(
+            lambda c: postal_names.get(str(c).zfill(5), ("", ""))[1]
+        )
     )
-    search_hits = search_area_catalog(catalog, search_query)
-    options = sorted(set(catalog["postal_code"].astype(str).str.zfill(5)))
-    if search_hits:
-        options = search_hits + [c for c in options if c not in search_hits]
+    compare_search = area_search_options(catalog_for_search)
+    compare_options = [code for code, _ in compare_search]
+    compare_labels = dict(compare_search)
 
     selected = st.multiselect(
         "Areas to compare (up to four)",
-        options=options,
+        options=compare_options,
         default=[
             c
             for c in st.session_state.compare_postal_codes
-            if c in options
+            if c in compare_options
         ][:MAX_COMPARE_AREAS],
-        format_func=lambda c: _format_compare_option(catalog, c),
+        format_func=lambda c: compare_labels.get(c, c),
+        placeholder="Type a postal code or area name to add an area",
         key="compare_multiselect",
         max_selections=MAX_COMPARE_AREAS,
     )
@@ -1062,10 +1073,11 @@ def _render_compare_tab(
     st.caption(similar_areas_explanation())
     if st.session_state.get("similar_for") not in selected:
         st.session_state.similar_for = selected[0]
+    similar_option_labels = _compare_option_labels(catalog)
     similar_for = st.selectbox(
         "Similar areas for",
         options=selected,
-        format_func=lambda c: _format_compare_option(catalog, c),
+        format_func=lambda c: similar_option_labels.get(c, c),
         key="similar_for",
     )
     matches = similar_areas(summaries, similar_for)
@@ -1596,11 +1608,6 @@ with map_tab:
     map_col, detail_col = st.columns([5, 4])
 
     with map_col:
-        search_query = st.text_input(
-            "Search by postal code or area name",
-            placeholder="e.g. 00100 or Punavuori",
-        )
-
         selection = st.plotly_chart(
             fig,
             use_container_width=True,
@@ -1655,22 +1662,49 @@ with map_tab:
         clicked_code = map_pick.postal_code if map_pick else None
         clicked_level = map_pick.level if map_pick else "postal"
 
-        search_hits = search_area_matches(map_df, search_query)
-        if search_hits:
-            picked = st.selectbox(
-                "Matching areas",
-                options=search_hits,
-                format_func=lambda c: f"{c} — {map_df.loc[map_df['postal_code']==c, 'area_name'].iloc[0]}",
-            )
-            if st.button("Show selected area"):
-                st.session_state.selected_postal_code = picked
-                st.session_state.selected_map_level = "postal"
-        elif search_query.strip():
-            st.caption("No areas match your search.")
-
         if clicked_code:
             st.session_state.selected_postal_code = clicked_code
             st.session_state.selected_map_level = clicked_level
+
+        if map_df.empty:
+            map_search_df = pd.DataFrame(
+                columns=["postal_code", "area_name", "municipality"]
+            )
+        else:
+            postal_names = postal_code_name_lookup(prices)
+            map_search_df = map_df[["postal_code", "area_name"]].copy()
+            map_search_df["postal_code"] = map_search_df["postal_code"].astype(
+                str
+            ).str.zfill(5)
+            map_search_df["municipality"] = map_search_df["postal_code"].map(
+                lambda c: postal_names.get(c, ("", ""))[1] or ""
+            )
+        map_search = area_search_options(map_search_df)
+        map_search_codes = [code for code, _ in map_search]
+        map_search_labels = dict(map_search)
+        if "_last_map_selected_code" not in st.session_state:
+            st.session_state._last_map_selected_code = st.session_state.get(
+                "selected_postal_code"
+            )
+        current_selected = st.session_state.get("selected_postal_code")
+        if current_selected != st.session_state.get("_last_map_selected_code"):
+            if current_selected in map_search_codes:
+                st.session_state["map_area_search"] = current_selected
+            st.session_state._last_map_selected_code = current_selected
+        if "map_area_search" not in st.session_state:
+            default_code = st.session_state.get("selected_postal_code")
+            if default_code in map_search_codes:
+                st.session_state["map_area_search"] = default_code
+
+        st.selectbox(
+            "Find an area",
+            options=map_search_codes,
+            format_func=lambda c: map_search_labels.get(c, c),
+            index=None,
+            placeholder="Type a postal code or area name, e.g. esp",
+            key="map_area_search",
+            on_change=_on_map_area_search_change,
+        )
 
     with detail_col:
         selected = st.session_state.selected_postal_code
