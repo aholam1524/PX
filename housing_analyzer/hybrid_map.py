@@ -35,6 +35,7 @@ from housing_analyzer.map import (
     METRIC_CHANGE_5Y_REAL,
     METRIC_CHOICES,
     METRIC_FITS_BUDGET,
+    METRIC_GROSS_RENTAL_YIELD,
     METRIC_PRICE,
     METRIC_PRICE_TO_INCOME,
     METRIC_SALES,
@@ -96,6 +97,10 @@ _HYBRID_UNSUPPORTED_REASONS: dict[str, str] = {
     METRIC_PRICE_TO_INCOME: (
         "Price-to-income uses Paavo income at postal-code level; municipality "
         "figures are not drawn for this layer."
+    ),
+    METRIC_GROSS_RENTAL_YIELD: (
+        "Gross rental yield uses postal-code prices and region- or city-level "
+        "rents; municipality price fill is not shown for this layer."
     ),
 }
 
