@@ -50,6 +50,31 @@ def test_apptest_detail_panel_with_fixtures(monkeypatch):
     ]
     joined = " ".join(chunks)
     assert "00100" in joined or "Area detail" in joined
+    metric_labels = " ".join(getattr(el, "label", "") or "" for el in at.metric)
+    assert "Market activity" in metric_labels
+    assert "per 1,000 inh." in joined
+
+
+def test_apptest_market_activity_map_layer(monkeypatch):
+    apptest_mod = importlib.util.find_spec("streamlit.testing.v1")
+    if apptest_mod is None:
+        pytest.skip("streamlit.testing.v1.AppTest not available in this Streamlit version")
+
+    monkeypatch.setenv("HOUSING_USE_FIXTURES", "1")
+
+    from streamlit.testing.v1 import AppTest
+
+    from housing_analyzer.map import METRIC_MARKET_ACTIVITY
+
+    at = AppTest.from_file(str(STREAMLIT_APP))
+    at.run(timeout=60)
+    assert not at.exception
+
+    metric_select = next(
+        sb for sb in at.selectbox if (sb.label or "").startswith("Metric layer")
+    )
+    metric_select.set_value(METRIC_MARKET_ACTIVITY).run(timeout=60)
+    assert not at.exception
 
 
 def test_apptest_area_profile_with_fixtures(monkeypatch):

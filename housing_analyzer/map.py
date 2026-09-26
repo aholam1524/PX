@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
+from housing_analyzer.analysis.market_activity import market_activity as compute_market_activity
 from housing_analyzer.analysis.metrics import (
     quarter_index,
     shift_quarter,
@@ -56,6 +57,7 @@ METRIC_CHANGE_5Y = "pct_change_5y"
 METRIC_CHANGE_1Y_REAL = "pct_change_1y_real"
 METRIC_CHANGE_5Y_REAL = "pct_change_5y_real"
 METRIC_SALES = "sales_4q"
+METRIC_MARKET_ACTIVITY = "market_activity"
 METRIC_PRICE_TO_INCOME = "price_to_income"
 METRIC_FITS_BUDGET = "fits_budget"
 
@@ -66,6 +68,10 @@ METRIC_CHOICES: tuple[tuple[str, str], ...] = (
     (METRIC_CHANGE_1Y_REAL, "1-year change (real)"),
     (METRIC_CHANGE_5Y_REAL, "5-year change (real)"),
     (METRIC_SALES, "Number of sales (last 4 quarters)"),
+    (
+        METRIC_MARKET_ACTIVITY,
+        "Market activity (sales per 1,000 inhabitants)",
+    ),
     (METRIC_PRICE_TO_INCOME, "Price-to-income ratio (rough)"),
     (METRIC_FITS_BUDGET, "Fits my budget"),
 )
@@ -85,6 +91,7 @@ METRIC_UNITS: dict[str, str] = {
     METRIC_CHANGE_1Y_REAL: "%",
     METRIC_CHANGE_5Y_REAL: "%",
     METRIC_SALES: "sales",
+    METRIC_MARKET_ACTIVITY: "sales per 1,000 inh.",
     METRIC_PRICE_TO_INCOME: "years income / m²",
     METRIC_FITS_BUDGET: "vs budget",
 }
@@ -343,6 +350,8 @@ def format_metric_value(value: float, metric: str) -> str:
         return f"{sign}{value:.1f} {unit}"
     if metric == METRIC_SALES:
         return f"{int(round(value))} {unit}"
+    if metric == METRIC_MARKET_ACTIVITY:
+        return f"{value:.1f} {unit}"
     if metric == METRIC_PRICE_TO_INCOME:
         return f"{value:.2f} {unit}"
     return f"{value} {unit}"
@@ -383,13 +392,26 @@ def format_hover_text(
     sales_text = "—"
     if sales is not None and not (isinstance(sales, float) and np.isnan(sales)) and not pd.isna(sales):
         sales_text = str(int(round(float(sales))))
+    population = row.get("population")
+    pop_text = "—"
+    if (
+        population is not None
+        and not (isinstance(population, float) and np.isnan(population))
+        and not pd.isna(population)
+    ):
+        pop_text = f"{int(round(float(population))):,}"
 
     lines = [
         f"<b>{postal}</b> {name}",
         f"{metric_label}: {value_text}",
-        f"Sales (last 4 quarters): {sales_text}",
-        f"Reliability: {reliability_display(row.get('reliability'))}",
     ]
+    if metric == METRIC_MARKET_ACTIVITY:
+        lines.append(
+            f"{sales_text} sales in the last four quarters, {pop_text} inhabitants"
+        )
+    else:
+        lines.append(f"Sales (last 4 quarters): {sales_text}")
+    lines.append(f"Reliability: {reliability_display(row.get('reliability'))}")
     if str(row.get("reliability")) == "low":
         lines.append(LOW_RELIABILITY_HOVER)
     return "<br>".join(lines)
@@ -428,10 +450,19 @@ def prepare_map_dataframe(
         prices_df, quarter, building_type=bt_label, df_real=prices_real
     ).reindex(codes)
     sales = trailing_sales_by_area(prices_df, quarter, code).reindex(codes)
+    sales_arr = sales.to_numpy(dtype=float)
 
     demo = demographics_df if demographics_df is not None else load_demographics()
     demo_index = demo.set_index(demo["postal_code"].astype(str).str.zfill(5))
     median_income = demo_index.reindex(codes)["median_income_eur"].to_numpy(dtype=float)
+    populations = demo_index.reindex(codes)["population"].to_numpy(dtype=float)
+    market_act = np.array(
+        [
+            compute_market_activity(s, p)
+            for s, p in zip(sales_arr, populations, strict=True)
+        ],
+        dtype=float,
+    )
     price_vals = summaries["price_per_sqm"].to_numpy(dtype=float)
     price_to_income = np.array(
         [
@@ -451,7 +482,9 @@ def prepare_map_dataframe(
             "pct_change_5y": summaries["pct_change_5y"].to_numpy(dtype=float),
             "pct_change_1y_real": summaries["pct_change_1y_real"].to_numpy(dtype=float),
             "pct_change_5y_real": summaries["pct_change_5y_real"].to_numpy(dtype=float),
-            "sales_4q": sales.to_numpy(dtype=float),
+            "sales_4q": sales_arr,
+            "population": populations,
+            "market_activity": market_act,
             "reliability": [
                 value if isinstance(value, str) else None
                 for value in summaries["reliability"]
