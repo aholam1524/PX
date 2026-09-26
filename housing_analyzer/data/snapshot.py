@@ -22,12 +22,33 @@ from housing_analyzer.data.cpi import API_URL as CPI_API_URL
 from housing_analyzer.data.cpi import fetch_cpi, load_cpi
 from housing_analyzer.data.demographics import (
     DEFAULT_DATA_YEAR,
+    MEASURE_ACTIVITY_INHABITANTS,
+    MEASURE_AVG_FLOOR_AREA_DWELLING,
+    MEASURE_AVG_FLOOR_AREA_PER_PERSON,
+    MEASURE_AVG_HOUSEHOLD_SIZE,
+    MEASURE_DWELLINGS,
+    MEASURE_DWELLINGS_BLOCKS,
+    MEASURE_DWELLINGS_SMALL_HOUSES,
+    MEASURE_EMPLOYED,
+    MEASURE_HOUSEHOLDS_OWNER,
+    MEASURE_HOUSEHOLDS_RENTED,
+    MEASURE_HOUSEHOLDS_TOTAL,
+    MEASURE_MEDIAN_HOUSEHOLD_INCOME,
+    MEASURE_PENSIONERS,
+    MEASURE_STUDENTS,
+    MEASURE_UNEMPLOYED,
     PAAVO_BASE,
+    TABLE_ACTIVITY,
+    TABLE_DWELLINGS,
     TABLE_EDUCATION,
+    TABLE_HOUSEHOLD_INCOME,
+    TABLE_HOUSEHOLDS,
     TABLE_INCOME,
     TABLE_POPULATION,
     fetch_demographics,
     load_demographics,
+    load_demographics_bundle,
+    write_national_demographics_snapshot,
 )
 from housing_analyzer.data.municipalities import (
     API_URL as MUNICIPALITY_API_URL,
@@ -40,8 +61,28 @@ from housing_analyzer.data.municipalities import (
 from housing_analyzer.data.prices import API_URL, fetch_prices, load_prices
 
 DEMOGRAPHICS_SOURCE_NOTE = (
-    f"{PAAVO_BASE} — tables 12ey.px, 12f1.px, 12ez.px (year {DEFAULT_DATA_YEAR})"
+    f"{PAAVO_BASE} — tables 12ey, 12f1, 12ez, 12f2, 12f3, 12f4, 12f6 "
+    f"(year {DEFAULT_DATA_YEAR})"
 )
+
+PAAVO_VARIABLE_CODES = {
+    "postal_code": "postinumeroalue_4_20260101",
+    "households_total": MEASURE_HOUSEHOLDS_TOTAL,
+    "average_household_size": MEASURE_AVG_HOUSEHOLD_SIZE,
+    "average_floor_area_per_person": MEASURE_AVG_FLOOR_AREA_PER_PERSON,
+    "households_owner_occupied": MEASURE_HOUSEHOLDS_OWNER,
+    "households_rented": MEASURE_HOUSEHOLDS_RENTED,
+    "median_household_income_eur": MEASURE_MEDIAN_HOUSEHOLD_INCOME,
+    "dwellings": MEASURE_DWELLINGS,
+    "average_floor_area_per_dwelling": MEASURE_AVG_FLOOR_AREA_DWELLING,
+    "dwellings_blocks_of_flats": MEASURE_DWELLINGS_BLOCKS,
+    "dwellings_small_houses": MEASURE_DWELLINGS_SMALL_HOUSES,
+    "activity_inhabitants": MEASURE_ACTIVITY_INHABITANTS,
+    "employed": MEASURE_EMPLOYED,
+    "unemployed": MEASURE_UNEMPLOYED,
+    "students": MEASURE_STUDENTS,
+    "pensioners": MEASURE_PENSIONERS,
+}
 
 BOUNDARIES_SOURCE_URL = (
     f"{WFS_BASE}?service=WFS&version=2.0.0&request=GetFeature"
@@ -142,6 +183,7 @@ def build_manifest(
     cpi_bytes: int = 0,
     demographics_rows: int = 0,
     demographics_bytes: int = 0,
+    demographics_national_bytes: int = 0,
     municipality_prices_rows: int = 0,
     municipality_prices_bytes: int = 0,
     municipality_prices_years: list[int] | None = None,
@@ -177,7 +219,18 @@ def build_manifest(
                 "population": TABLE_POPULATION,
                 "income": TABLE_INCOME,
                 "education": TABLE_EDUCATION,
+                "households": TABLE_HOUSEHOLDS,
+                "household_income": TABLE_HOUSEHOLD_INCOME,
+                "dwellings": TABLE_DWELLINGS,
+                "activity": TABLE_ACTIVITY,
             },
+            "data_year": DEFAULT_DATA_YEAR,
+            "variable_codes": PAAVO_VARIABLE_CODES,
+        },
+        "demographics_national.json.gz": {
+            "bytes": demographics_national_bytes,
+            "source_url": DEMOGRAPHICS_SOURCE_NOTE,
+            "national_code": "SSS",
             "data_year": DEFAULT_DATA_YEAR,
         },
         "municipality_prices.csv.gz": {
@@ -199,6 +252,7 @@ def build_manifest(
         + boundaries_bytes
         + cpi_bytes
         + demographics_bytes
+        + demographics_national_bytes
         + municipality_prices_bytes
         + municipality_boundaries_bytes
     )
@@ -217,6 +271,7 @@ def write_snapshot(
     municipality_prices: pd.DataFrame | None = None,
     municipality_boundaries: dict[str, Any] | None = None,
     *,
+    demographics_national: pd.Series | None = None,
     fetch_date: date | None = None,
 ) -> dict[str, Any]:
     """Write snapshot files and manifest; enforce the size limit."""
@@ -228,6 +283,12 @@ def write_snapshot(
     demographics_bytes = _write_demographics_snapshot(
         demographics, data_paths.DEMOGRAPHICS_SNAPSHOT_FILE
     )
+    national = demographics_national if demographics_national is not None else pd.Series()
+    demographics_national_bytes = 0
+    if not national.empty:
+        demographics_national_bytes = write_national_demographics_snapshot(
+            national, data_paths.DEMOGRAPHICS_NATIONAL_SNAPSHOT_FILE
+        )
 
     mun_prices = municipality_prices if municipality_prices is not None else pd.DataFrame()
     mun_boundaries = municipality_boundaries
@@ -253,6 +314,7 @@ def write_snapshot(
         cpi_bytes=cpi_bytes,
         demographics_rows=len(demographics),
         demographics_bytes=demographics_bytes,
+        demographics_national_bytes=demographics_national_bytes,
         municipality_prices_rows=len(mun_prices),
         municipality_prices_bytes=municipality_prices_bytes,
         municipality_prices_years=years,
@@ -274,13 +336,17 @@ def build_snapshot(*, refresh: bool = True) -> dict[str, Any]:
         prices = fetch_prices(refresh=True)
         boundaries = fetch_boundaries()
         cpi = fetch_cpi()
-        demographics = fetch_demographics()
+        demo_bundle = fetch_demographics()
+        demographics = demo_bundle.areas
+        demographics_national = demo_bundle.national
         municipality_prices = fetch_municipality_prices()
     else:
         prices = load_prices(refresh=False)
         boundaries = load_boundaries(refresh=False)
         cpi = load_cpi(refresh=False)
-        demographics = load_demographics(refresh=False)
+        demo_bundle = load_demographics_bundle(refresh=False)
+        demographics = demo_bundle.areas
+        demographics_national = demo_bundle.national
         municipality_prices = load_municipality_prices(refresh=False)
 
     municipality_boundaries = build_municipality_boundaries(boundaries)
@@ -296,6 +362,7 @@ def build_snapshot(*, refresh: bool = True) -> dict[str, Any]:
         demographics,
         municipality_prices,
         municipality_boundaries,
+        demographics_national=demographics_national,
     )
 
 

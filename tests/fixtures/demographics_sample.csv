@@ -1,4 +1,4 @@
-postal_code,data_year,population,median_income_eur,share_age_65_plus,share_higher_education
-00100,2024,1200,45000.0,0.12,0.35
-00200,2024,800,38000.0,0.18,0.22
-00300,2024,950,52000.0,0.15,0.41
+postal_code,data_year,population,median_income_eur,share_age_65_plus,share_higher_education,households_total,average_household_size,average_floor_area_per_person,households_owner_occupied,households_rented,median_household_income_eur,dwellings,average_floor_area_per_dwelling,dwellings_blocks_of_flats,dwellings_small_houses,activity_inhabitants,employed,unemployed,students,pensioners,rented_share,owner_occupied_share,unemployment_rate,student_share,pensioner_share,share_blocks_of_flats
+00100,2024,1200,45000.0,0.12,0.35,100,1.75,35.0,38,62,52000.0,500,85.0,300,200,1000,80,20,120,250,0.62,0.38,0.2,0.12,0.25,0.6
+00200,2024,800,38000.0,0.18,0.22,80,1.5,30.0,50,30,40000.0,400,75.0,160,240,800,70,10,80,160,0.375,0.625,0.125,0.1,0.2,0.4
+00300,2024,950,52000.0,0.15,0.41,90,1.6,32.0,45,45,48000.0,450,80.0,225,225,950,85,15,95,190,0.5,0.5,0.15,0.1,0.2,0.5
