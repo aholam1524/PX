@@ -14,6 +14,8 @@ DEMOGRAPHICS_SNAPSHOT_FILE = SNAPSHOT_DIR / "demographics.csv.gz"
 DEMOGRAPHICS_NATIONAL_SNAPSHOT_FILE = SNAPSHOT_DIR / "demographics_national.json.gz"
 MUNICIPALITY_PRICES_SNAPSHOT_FILE = SNAPSHOT_DIR / "municipality_prices.csv.gz"
 MUNICIPALITY_BOUNDARIES_SNAPSHOT_FILE = SNAPSHOT_DIR / "municipalities.geojson.gz"
+RENTS_SNAPSHOT_FILE = SNAPSHOT_DIR / "rents.csv.gz"
+MUNICIPALITY_REGION_SNAPSHOT_FILE = SNAPSHOT_DIR / "municipality_region.csv"
 MANIFEST_FILE = SNAPSHOT_DIR / "manifest.json"
 
 MAX_SNAPSHOT_TOTAL_BYTES = 20 * 1024 * 1024
@@ -26,6 +28,8 @@ DEMOGRAPHICS_FIXTURE_FILE = FIXTURES_DIR / "demographics_sample.csv"
 DEMOGRAPHICS_NATIONAL_FIXTURE_FILE = FIXTURES_DIR / "demographics_national_sample.json"
 MUNICIPALITY_PRICES_FIXTURE_FILE = FIXTURES_DIR / "municipality_prices_sample.json"
 MUNICIPALITY_BOUNDARIES_FIXTURE_FILE = FIXTURES_DIR / "municipality_boundaries_sample.geojson"
+RENTS_FIXTURE_FILE = FIXTURES_DIR / "rents_sample.json"
+MUNICIPALITY_REGION_FIXTURE_FILE = FIXTURES_DIR / "municipality_region_sample.csv"
 
 
 def use_fixtures() -> bool:

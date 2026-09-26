@@ -90,7 +90,26 @@
       "features": 309,
       "source_url": "https://geo.stat.fi/geoserver/postialue/wfs?service=WFS&version=2.0.0&request=GetFeature&typeName=postialue:pno_2022&outputFormat=application%2Fjson&srsName=EPSG%3A4326",
       "derived_from": "boundaries.geojson.gz"
+    },
+    "rents.csv.gz": {
+      "bytes": 65858,
+      "rows": 6120,
+      "source_url": "https://pxdata.stat.fi/PxWeb/api/v1/en/StatFin/asvu/15fa.px",
+      "table_id": "15fa.px",
+      "quarters": [
+        "2025Q1",
+        "2025Q2",
+        "2025Q3",
+        "2025Q4",
+        "2026Q1",
+        "2026Q2"
+      ]
+    },
+    "municipality_region.csv": {
+      "bytes": 10489,
+      "rows": 308,
+      "source_url": "https://data.stat.fi/api/classifications/v2/correspondenceTables/kunta_1_20250101%23maakunta_1_20250101/maps?content=data&meta=min&lang=en"
     }
   },
-  "total_bytes": 5602038
+  "total_bytes": 5678385
 }

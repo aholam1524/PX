@@ -694,6 +694,21 @@ def municipality_real_changes(
     return out
 
 
+def municipality_codes_from_boundaries(
+    municipality_boundaries: Mapping[str, Any],
+) -> tuple[str, ...]:
+    """Municipality numbers present in a municipality boundaries FeatureCollection."""
+    codes: set[str] = set()
+    for feature in municipality_boundaries.get("features") or []:
+        if not isinstance(feature, dict):
+            continue
+        props = feature.get("properties") or {}
+        code = _municipality_code(props.get("municipality_code"))
+        if code is not None:
+            codes.add(code)
+    return tuple(sorted(codes))
+
+
 def municipality_join_report(
     mun_df: pd.DataFrame,
     municipality_boundaries: Mapping[str, Any],
@@ -703,14 +718,7 @@ def municipality_join_report(
     if not mun_df.empty:
         price_codes = set(mun_df["municipality_code"].astype(str).str.zfill(3))
 
-    boundary_codes: set[str] = set()
-    for feature in municipality_boundaries.get("features") or []:
-        if not isinstance(feature, dict):
-            continue
-        props = feature.get("properties") or {}
-        code = _municipality_code(props.get("municipality_code"))
-        if code is not None:
-            boundary_codes.add(code)
+    boundary_codes = set(municipality_codes_from_boundaries(municipality_boundaries))
 
     only_in_prices = tuple(sorted(price_codes - boundary_codes))
     only_in_boundaries = tuple(sorted(boundary_codes - price_codes))
