@@ -40,6 +40,7 @@ from housing_analyzer.map import (
     METRIC_PRICE_TO_INCOME,
     METRIC_SALES,
     METRIC_MARKET_ACTIVITY,
+    METRIC_PAYMENT_INCOME_SHARE,
     METRIC_UNITS,
     MISSING_COLOR,
     MISSING_OUTLINE_COLOR,
@@ -97,6 +98,10 @@ _HYBRID_UNSUPPORTED_REASONS: dict[str, str] = {
     METRIC_PRICE_TO_INCOME: (
         "Price-to-income uses Paavo income at postal-code level; municipality "
         "figures are not drawn for this layer."
+    ),
+    METRIC_PAYMENT_INCOME_SHARE: (
+        "Payment share of household income uses Paavo household income at "
+        "postal-code level; municipality fill is not shown for this layer."
     ),
     METRIC_GROSS_RENTAL_YIELD: (
         "Gross rental yield uses postal-code prices and region- or city-level "

@@ -14,6 +14,26 @@ BUDGET_FIT_WITHIN = "within"
 BUDGET_FIT_OVER = "over"
 BUDGET_FIT_STRETCH = "stretch"
 
+# Rules of thumb for payment share of household income (not official lending limits).
+PAYMENT_SHARE_COMFORTABLE = "comfortable"
+PAYMENT_SHARE_STRETCHED = "stretched"
+PAYMENT_SHARE_HARD = "hard"
+PAYMENT_SHARE_NO_DATA = "no data"
+PAYMENT_SHARE_COMFORTABLE_MAX = 0.30
+PAYMENT_SHARE_STRETCHED_MAX = 0.40
+
+PAYMENT_SHARE_LABELS: dict[str, str] = {
+    PAYMENT_SHARE_COMFORTABLE: "Comfortable (≤30 % of income)",
+    PAYMENT_SHARE_STRETCHED: "Stretched (30–40 %)",
+    PAYMENT_SHARE_HARD: "Hard (>40 %)",
+    PAYMENT_SHARE_NO_DATA: "No income data",
+}
+
+PAYMENT_SHARE_RULES_NOTE = (
+    "Payment share classes (≤30 % comfortable, 30–40 % stretched, above 40 % hard) "
+    "are **rules of thumb**, not official lending limits; lenders apply their own criteria."
+)
+
 _STRETCH_UPPER_RATIO = 1.2
 
 
@@ -116,6 +136,81 @@ def budget_ratio_and_category(
     return ratio, classify_budget_fit_ratio(ratio)
 
 
+def payment_to_income(
+    monthly_payment: float, annual_household_income: float
+) -> float:
+    """Monthly payment × 12 / annual household income, as a fraction."""
+    if (
+        annual_household_income is None
+        or (isinstance(annual_household_income, float) and np.isnan(annual_household_income))
+        or pd.isna(annual_household_income)
+        or annual_household_income <= 0
+    ):
+        return float("nan")
+    if (
+        monthly_payment is None
+        or (isinstance(monthly_payment, float) and np.isnan(monthly_payment))
+        or pd.isna(monthly_payment)
+    ):
+        return float("nan")
+    return float(monthly_payment) * 12.0 / float(annual_household_income)
+
+
+def classify_payment_share(share: float) -> str:
+    """Rules of thumb: ≤30 % comfortable, ≤40 % stretched, above hard; missing → no data."""
+    if share is None or (isinstance(share, float) and (np.isnan(share) or math.isinf(share))):
+        return PAYMENT_SHARE_NO_DATA
+    if pd.isna(share):
+        return PAYMENT_SHARE_NO_DATA
+    value = float(share)
+    if value <= PAYMENT_SHARE_COMFORTABLE_MAX:
+        return PAYMENT_SHARE_COMFORTABLE
+    if value <= PAYMENT_SHARE_STRETCHED_MAX:
+        return PAYMENT_SHARE_STRETCHED
+    return PAYMENT_SHARE_HARD
+
+
+def stress_test(
+    price: float,
+    down_payment: float,
+    annual_rate_pct: float,
+    years: float,
+    annual_household_income: float,
+    *,
+    rate_steps: tuple[int, ...] = (0, 1, 2, 3),
+    income_shock_pct: float = 0,
+) -> pd.DataFrame:
+    """One row per rate step (percentage points added) with payment share and class."""
+    shocked_income = annual_household_income
+    if (
+        shocked_income is not None
+        and not (isinstance(shocked_income, float) and np.isnan(shocked_income))
+        and not pd.isna(shocked_income)
+        and income_shock_pct != 0
+    ):
+        shocked_income = float(shocked_income) * (1.0 + float(income_shock_pct) / 100.0)
+
+    rows: list[dict[str, Any]] = []
+    for step in rate_steps:
+        rate = float(annual_rate_pct) + float(step)
+        try:
+            principal = loan_amount(price, down_payment)
+            payment = monthly_payment(principal, rate, years)
+        except ValueError:
+            payment = float("nan")
+        share = payment_to_income(payment, shocked_income)
+        rows.append(
+            {
+                "rate_step_pp": int(step),
+                "annual_rate_pct": rate,
+                "monthly_payment": payment,
+                "payment_income_share": share,
+                "payment_share_class": classify_payment_share(share),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def classify_budget_fit_ratio(ratio: float) -> str:
     """Map price/budget ratio to fit, stretch (≤20% over), or over."""
     if ratio != ratio or math.isinf(ratio):  # NaN
@@ -155,6 +250,28 @@ _BUDGET_FIT_SORT_ORDER = {
 }
 
 
+def _household_income_lookup(
+    demographics_df: pd.DataFrame | None,
+) -> tuple[dict[str, float], dict[str, int | float]]:
+    """Postal code → median household income (EUR/year) and data year."""
+    if demographics_df is None or demographics_df.empty:
+        return {}, {}
+    demo = demographics_df.copy()
+    demo["postal_code"] = demo["postal_code"].astype(str).str.zfill(5)
+    income_by_code: dict[str, float] = {}
+    year_by_code: dict[str, int | float] = {}
+    for _, row in demo.iterrows():
+        code = str(row["postal_code"]).zfill(5)
+        raw = row.get("median_household_income_eur")
+        if raw is None or (isinstance(raw, float) and np.isnan(raw)) or pd.isna(raw):
+            continue
+        income_by_code[code] = float(raw)
+        year = row.get("data_year")
+        if year is not None and not pd.isna(year):
+            year_by_code[code] = year
+    return income_by_code, year_by_code
+
+
 def affordability_table(
     prices_df: pd.DataFrame,
     quarter: str,
@@ -165,6 +282,7 @@ def affordability_table(
     years: float,
     down_payment_value: float,
     use_percent: bool,
+    demographics_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """One row per postal-code area with a published price for the selection."""
     from housing_analyzer.map import resolve_building_type_label
@@ -186,9 +304,14 @@ def affordability_table(
                 "headroom",
                 "pct_change_1y",
                 "reliability",
+                "median_household_income_eur",
+                "household_income_data_year",
+                "payment_income_share",
+                "payment_share_class",
             ]
         )
 
+    income_by_code, year_by_code = _household_income_lookup(demographics_df)
     name_lookup = postal_code_name_lookup(prices_df)
     rows: list[dict[str, Any]] = []
     for postal_code, summary in summaries.iterrows():
@@ -212,6 +335,8 @@ def affordability_table(
         headroom = max_affordable_price - typical
         code = str(postal_code).zfill(5)
         area_name, municipality = name_lookup.get(code, ("", ""))
+        hh_income = income_by_code.get(code)
+        share = payment_to_income(payment, hh_income) if hh_income is not None else float("nan")
         rows.append(
             {
                 "postal_code": code,
@@ -225,6 +350,10 @@ def affordability_table(
                 "headroom": headroom,
                 "pct_change_1y": summary.get("pct_change_1y"),
                 "reliability": summary.get("reliability"),
+                "median_household_income_eur": hh_income,
+                "household_income_data_year": year_by_code.get(code),
+                "payment_income_share": share,
+                "payment_share_class": classify_payment_share(share),
             }
         )
     return pd.DataFrame(rows)
@@ -237,10 +366,28 @@ def affordability_summary(
     n_with_price = len(table)
     n_fits = int((table["budget_fit"] == BUDGET_FIT_WITHIN).sum()) if n_with_price else 0
     share = (100.0 * n_fits / n_with_price) if n_with_price else 0.0
+    has_payment_share = n_with_price and "payment_share_class" in table.columns
+    n_comfortable = (
+        int((table["payment_share_class"] == PAYMENT_SHARE_COMFORTABLE).sum())
+        if has_payment_share
+        else 0
+    )
+    n_comfortable_and_fits = (
+        int(
+            (
+                (table["payment_share_class"] == PAYMENT_SHARE_COMFORTABLE)
+                & (table["budget_fit"] == BUDGET_FIT_WITHIN)
+            ).sum()
+        )
+        if has_payment_share
+        else 0
+    )
     return {
         "n_with_price": n_with_price,
         "n_fits": n_fits,
         "fit_share_pct": share,
+        "n_comfortable": n_comfortable,
+        "n_comfortable_and_fits": n_comfortable_and_fits,
         "max_affordable_price": max_affordable_price,
     }
 
@@ -249,6 +396,7 @@ def filter_affordability_table(
     table: pd.DataFrame,
     *,
     only_fits: bool = False,
+    only_comfortable: bool = False,
     hide_low_reliability: bool = False,
     municipalities: list[str] | None = None,
 ) -> pd.DataFrame:
@@ -256,6 +404,8 @@ def filter_affordability_table(
     out = table
     if only_fits:
         out = out.loc[out["budget_fit"] == BUDGET_FIT_WITHIN]
+    if only_comfortable:
+        out = out.loc[out["payment_share_class"] == PAYMENT_SHARE_COMFORTABLE]
     if hide_low_reliability:
         out = out.loc[out["reliability"] != "low"]
     if municipalities:
