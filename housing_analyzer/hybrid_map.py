@@ -38,6 +38,7 @@ from housing_analyzer.map import (
     METRIC_PRICE,
     METRIC_PRICE_TO_INCOME,
     METRIC_SALES,
+    METRIC_MARKET_ACTIVITY,
     METRIC_UNITS,
     MISSING_COLOR,
     MISSING_OUTLINE_COLOR,
@@ -87,6 +88,10 @@ _HYBRID_UNSUPPORTED_REASONS: dict[str, str] = {
     METRIC_SALES: (
         "Municipality sales are reported as annual totals, not as a trailing "
         "four-quarter count, so the municipality layer is not shown for this metric."
+    ),
+    METRIC_MARKET_ACTIVITY: (
+        "Market activity uses postal-area population from Paavo; municipality "
+        "fill is not shown for this layer."
     ),
     METRIC_PRICE_TO_INCOME: (
         "Price-to-income uses Paavo income at postal-code level; municipality "

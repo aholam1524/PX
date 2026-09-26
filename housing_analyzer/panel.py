@@ -10,6 +10,10 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
+from housing_analyzer.analysis.market_activity import (
+    market_activity,
+    market_activity_reliability_note,
+)
 from housing_analyzer.analysis.metrics import (
     area_prices_at,
     quarter_index,
@@ -546,6 +550,36 @@ def trailing_sales_count(
 ) -> float:
     code = None if building_type_code in (None, "all") else building_type_code
     return trailing_sales_sum(prices_df, postal_code, quarter, code)
+
+
+MARKET_ACTIVITY_METRIC_HELP = (
+    "Sales in the last four quarters per 1,000 inhabitants in the postal area "
+    "(Paavo population). A rough activity index, not a turnover rate of the housing stock."
+)
+
+
+def market_activity_for_area(
+    prices_df: pd.DataFrame,
+    postal_code: str,
+    quarter: str,
+    building_type_code: str | None,
+    demographics_df: pd.DataFrame,
+) -> float:
+    code = str(postal_code).zfill(5)
+    sales_4q = trailing_sales_count(prices_df, code, quarter, building_type_code)
+    demo = demographics_df.copy()
+    demo["postal_code"] = demo["postal_code"].astype(str).str.zfill(5)
+    demo_index = demo.set_index("postal_code")
+    population = (
+        float(demo_index.loc[code, "population"])
+        if code in demo_index.index
+        else float("nan")
+    )
+    return market_activity(sales_4q, population)
+
+
+def market_activity_panel_caption(sales_4q: float) -> str | None:
+    return market_activity_reliability_note(sales_4q)
 
 
 def default_selected_postal_code(prices_df: pd.DataFrame) -> str | None:
