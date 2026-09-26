@@ -543,6 +543,91 @@ def default_selected_postal_code(prices_df: pd.DataFrame) -> str | None:
     return str(totals.idxmax())
 
 
+PAAVO_SUPPRESSED_TOOLTIP = (
+    "Statistics Finland suppresses values when counts are too small to publish."
+)
+
+
+@dataclass(frozen=True)
+class AreaProfileItem:
+    label: str
+    area_text: str
+    national_text: str
+    help: str | None
+
+
+def _format_profile_number(value: float | None, *, decimals: int = 1) -> str:
+    if value is None or (isinstance(value, float) and np.isnan(value)) or pd.isna(value):
+        return "—"
+    return f"{float(value):.{decimals}f}"
+
+
+def _format_profile_percent(value: float | None) -> str:
+    if value is None or (isinstance(value, float) and np.isnan(value)) or pd.isna(value):
+        return "—"
+    return f"{int(round(float(value) * 100))}%"
+
+
+def _national_suffix(national_text: str) -> str:
+    if national_text == "—":
+        return "(country —)"
+    return f"(country {national_text})"
+
+
+def build_area_profile_items(
+    area_row: Mapping[str, Any],
+    national_row: Mapping[str, Any],
+) -> tuple[AreaProfileItem, ...]:
+    """Rows for the detail-panel area profile (Paavo vs national SSS)."""
+    tooltip = PAAVO_SUPPRESSED_TOOLTIP
+
+    def item(
+        label: str,
+        area_key: str,
+        *,
+        percent: bool = False,
+        decimals: int = 1,
+    ) -> AreaProfileItem:
+        raw_area = area_row.get(area_key)
+        raw_nat = national_row.get(area_key)
+        formatter = _format_profile_percent if percent else _format_profile_number
+        area_text = formatter(raw_area)
+        national_text = formatter(raw_nat)
+        help_text = tooltip if area_text == "—" else None
+        return AreaProfileItem(
+            label=label,
+            area_text=area_text,
+            national_text=_national_suffix(national_text),
+            help=help_text,
+        )
+
+    return (
+        item("Average household size", "average_household_size", decimals=2),
+        item("Average floor area per dwelling (m²)", "average_floor_area_per_dwelling"),
+        item("Rented households", "rented_share", percent=True),
+        item("Unemployment rate", "unemployment_rate", percent=True),
+        item("Students (share of inhabitants)", "student_share", percent=True),
+        item("Pensioners (share of inhabitants)", "pensioner_share", percent=True),
+        item(
+            "Dwellings in blocks of flats",
+            "share_blocks_of_flats",
+            percent=True,
+        ),
+    )
+
+
+def area_profile_data_year(
+    area_row: Mapping[str, Any], national_row: Mapping[str, Any]
+) -> int | None:
+    for row in (area_row, national_row):
+        year = row.get("data_year")
+        if year is not None and not (isinstance(year, float) and np.isnan(year)) and not pd.isna(
+            year
+        ):
+            return int(year)
+    return None
+
+
 def reliability_explanation(
     reliability_label: str | None, sales_4q: float
 ) -> str:
