@@ -4,17 +4,20 @@ from housing_analyzer.data.boundaries import join_prices_to_areas, load_boundari
 from housing_analyzer.data.cpi import fetch_cpi, load_cpi
 from housing_analyzer.data.demographics import fetch_demographics, load_demographics
 from housing_analyzer.data.prices import fetch_prices, load_prices
+from housing_analyzer.data.rents import fetch_rents, load_rents
 
 __all__ = [
     "fetch_cpi",
     "fetch_demographics",
     "fetch_prices",
+    "fetch_rents",
     "join_prices_to_areas",
     "load_boundaries",
     "load_cpi",
     "load_demographics",
     "load_manifest",
     "load_prices",
+    "load_rents",
 ]
 
 

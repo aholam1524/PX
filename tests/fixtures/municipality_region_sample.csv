@@ -1,0 +1,7 @@
+municipality_number,municipality_name,region_code,region_name,rent_region_code
+018,Askola,01,Uusimaa,MK01
+091,Helsinki,01,Uusimaa,MK01
+202,Lieto,02,Varsinais-Suomi,MK02
+235,Kauniainen,01,Uusimaa,MK01
+853,Turku,02,Varsinais-Suomi,MK02
+999,Unknown,99,Nowhere,

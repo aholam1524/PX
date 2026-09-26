@@ -59,6 +59,16 @@ from housing_analyzer.data.municipalities import (
     municipality_join_report,
 )
 from housing_analyzer.data.prices import API_URL, fetch_prices, load_prices
+from housing_analyzer.data.rents import (
+    API_URL as RENTS_API_URL,
+    CLASSIFICATION_MAPS_URL,
+    TABLE_ID as RENTS_TABLE_ID,
+    fetch_municipality_region_map,
+    fetch_rents,
+    load_municipality_region_map,
+    load_rents,
+    write_municipality_region_snapshot,
+)
 
 DEMOGRAPHICS_SOURCE_NOTE = (
     f"{PAAVO_BASE} — tables 12ey, 12f1, 12ez, 12f2, 12f3, 12f4, 12f6 "
@@ -157,6 +167,12 @@ def _write_municipality_prices_snapshot(frame: pd.DataFrame, path: Path) -> int:
     return path.stat().st_size
 
 
+def _write_rents_snapshot(frame: pd.DataFrame, path: Path) -> int:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    frame.to_csv(path, index=False, compression="gzip")
+    return path.stat().st_size
+
+
 def _write_municipality_boundaries_snapshot(collection: dict[str, Any], path: Path) -> int:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(collection, ensure_ascii=False, separators=(",", ":"))
@@ -189,6 +205,11 @@ def build_manifest(
     municipality_prices_years: list[int] | None = None,
     municipality_boundaries_features: int = 0,
     municipality_boundaries_bytes: int = 0,
+    rents_rows: int = 0,
+    rents_bytes: int = 0,
+    rents_quarters: list[str] | None = None,
+    municipality_region_rows: int = 0,
+    municipality_region_bytes: int = 0,
     fetch_date: date | None = None,
 ) -> dict[str, Any]:
     """Build manifest metadata for a snapshot directory."""
@@ -246,6 +267,18 @@ def build_manifest(
             "source_url": BOUNDARIES_SOURCE_URL,
             "derived_from": "boundaries.geojson.gz",
         },
+        "rents.csv.gz": {
+            "bytes": rents_bytes,
+            "rows": rents_rows,
+            "source_url": RENTS_API_URL,
+            "table_id": RENTS_TABLE_ID,
+            "quarters": rents_quarters or [],
+        },
+        "municipality_region.csv": {
+            "bytes": municipality_region_bytes,
+            "rows": municipality_region_rows,
+            "source_url": CLASSIFICATION_MAPS_URL,
+        },
     }
     total = (
         prices_bytes
@@ -255,6 +288,8 @@ def build_manifest(
         + demographics_national_bytes
         + municipality_prices_bytes
         + municipality_boundaries_bytes
+        + rents_bytes
+        + municipality_region_bytes
     )
     return {
         "fetch_date": when.isoformat(),
@@ -270,6 +305,8 @@ def write_snapshot(
     demographics: pd.DataFrame,
     municipality_prices: pd.DataFrame | None = None,
     municipality_boundaries: dict[str, Any] | None = None,
+    rents: pd.DataFrame | None = None,
+    municipality_region: pd.DataFrame | None = None,
     *,
     demographics_national: pd.Series | None = None,
     fetch_date: date | None = None,
@@ -302,9 +339,22 @@ def write_snapshot(
         mun_boundaries, data_paths.MUNICIPALITY_BOUNDARIES_SNAPSHOT_FILE
     )
 
+    rent_frame = rents if rents is not None else pd.DataFrame()
+    rents_bytes = _write_rents_snapshot(rent_frame, data_paths.RENTS_SNAPSHOT_FILE)
+
+    region_frame = municipality_region if municipality_region is not None else pd.DataFrame()
+    municipality_region_bytes = 0
+    if not region_frame.empty:
+        municipality_region_bytes = write_municipality_region_snapshot(region_frame)
+    elif data_paths.MUNICIPALITY_REGION_SNAPSHOT_FILE.is_file():
+        municipality_region_bytes = data_paths.MUNICIPALITY_REGION_SNAPSHOT_FILE.stat().st_size
+
     features = boundaries.get("features") or []
     mun_features = mun_boundaries.get("features") or []
     years = sorted({int(y) for y in mun_prices["year"].unique()}) if not mun_prices.empty else []
+    rent_quarters = (
+        sorted(rent_frame["quarter"].unique().tolist()) if not rent_frame.empty else []
+    )
     manifest = build_manifest(
         prices_rows=len(prices),
         prices_bytes=prices_bytes,
@@ -320,6 +370,11 @@ def write_snapshot(
         municipality_prices_years=years,
         municipality_boundaries_features=len(mun_features),
         municipality_boundaries_bytes=municipality_boundaries_bytes,
+        rents_rows=len(rent_frame),
+        rents_bytes=rents_bytes,
+        rents_quarters=rent_quarters,
+        municipality_region_rows=len(region_frame),
+        municipality_region_bytes=municipality_region_bytes,
         fetch_date=fetch_date,
     )
     data_paths.SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
@@ -340,6 +395,8 @@ def build_snapshot(*, refresh: bool = True) -> dict[str, Any]:
         demographics = demo_bundle.areas
         demographics_national = demo_bundle.national
         municipality_prices = fetch_municipality_prices()
+        rents = fetch_rents()
+        municipality_region = fetch_municipality_region_map()
     else:
         prices = load_prices(refresh=False)
         boundaries = load_boundaries(refresh=False)
@@ -348,6 +405,8 @@ def build_snapshot(*, refresh: bool = True) -> dict[str, Any]:
         demographics = demo_bundle.areas
         demographics_national = demo_bundle.national
         municipality_prices = load_municipality_prices(refresh=False)
+        rents = load_rents(refresh=False)
+        municipality_region = load_municipality_region_map(refresh=False)
 
     municipality_boundaries = build_municipality_boundaries(boundaries)
     municipality_boundaries = apply_municipality_names_to_boundaries(
@@ -362,6 +421,8 @@ def build_snapshot(*, refresh: bool = True) -> dict[str, Any]:
         demographics,
         municipality_prices,
         municipality_boundaries,
+        rents,
+        municipality_region,
         demographics_national=demographics_national,
     )
 
