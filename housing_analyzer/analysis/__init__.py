@@ -12,6 +12,11 @@ from housing_analyzer.analysis.similar_areas import (
     similar_areas,
     similar_areas_explanation,
 )
+from housing_analyzer.analysis.market_activity import (
+    market_activity,
+    market_activity_reliability_note,
+    market_activity_table,
+)
 from housing_analyzer.analysis.metrics import (
     area_prices_at,
     pct_change,
@@ -29,6 +34,9 @@ from housing_analyzer.analysis.metrics import (
 
 __all__ = [
     "area_catalog",
+    "market_activity",
+    "market_activity_reliability_note",
+    "market_activity_table",
     "area_prices_at",
     "build_compare_chart_data",
     "build_compare_figure",

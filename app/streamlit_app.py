@@ -80,6 +80,7 @@ from housing_analyzer.map import (
     METRIC_CHANGE_1Y,
     METRIC_CHANGE_5Y,
     METRIC_FITS_BUDGET,
+    METRIC_MARKET_ACTIVITY,
     METRIC_PRICE,
     build_choropleth_figure,
     count_areas_with_published_price,
@@ -110,6 +111,9 @@ from housing_analyzer.panel import (
     default_selected_postal_code,
     flag_unusual_quarter_changes,
     format_area_header,
+    market_activity_for_area,
+    market_activity_panel_caption,
+    MARKET_ACTIVITY_METRIC_HELP,
     municipality_name_from_prices,
     quarterly_area_prices,
     quarterly_transaction_counts,
@@ -1047,6 +1051,10 @@ def _render_detail_panel(
         help="Sales in the last four quarters.",
     )
 
+    market_act = market_activity_for_area(
+        prices, code, quarter, panel_bt_code, demographics
+    )
+
     c5, c6 = st.columns(2)
     c5.metric(
         "Rank",
@@ -1058,6 +1066,20 @@ def _render_detail_panel(
         f"{pct:.0f}th" if pct == pct else "—",
         help="Percentile among all areas in this quarter (higher = more expensive).",
     )
+
+    c7, c8 = st.columns(2)
+    c7.metric(
+        "Market activity",
+        f"{market_act:.1f} per 1,000 inh."
+        if market_act == market_act
+        else "—",
+        help=MARKET_ACTIVITY_METRIC_HELP,
+    )
+    c8.empty()
+    market_act_caption = market_activity_panel_caption(sales_4q)
+    if market_act_caption:
+        st.caption(market_act_caption)
+
     st.caption(rel_text)
 
     demo_index = demographics.set_index(
@@ -1304,7 +1326,7 @@ with map_tab:
             for key, label in BUDGET_FIT_LABELS.items():
                 st.caption(f"**{label}**")
         else:
-            st.markdown(
+            bullets = (
                 "- **Darker fill** means a **higher** value; **lighter fill** means lower (light grey to black).\n"
                 "- **Coloured areas** show the selected metric for the chosen quarter and building type.\n"
                 "- **Unfilled areas** (outline only) have no published value for that selection "
@@ -1315,6 +1337,13 @@ with map_tab:
                 "(fewer than ten sales in the last four quarters).\n"
                 "- Hover a region for postal code, area name, metric value, sales, and reliability."
             )
+            if metric == METRIC_MARKET_ACTIVITY:
+                bullets += (
+                    "\n- **Market activity** uses transaction counts (from 2020 onward) for old "
+                    "dwellings in housing companies and the postal area's total population (Paavo); "
+                    "it is a rough activity index, not a turnover rate of the housing stock."
+                )
+            st.markdown(bullets)
 
     if not municipality_data_ready:
         st.caption(
