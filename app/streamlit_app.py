@@ -567,10 +567,10 @@ def _render_affordability_tab(
         st.warning("No areas have a published price for this quarter and building type.")
     elif summary["n_fits"]:
         comfort_suffix = ""
-        if summary["n_comfortable"]:
+        if summary["n_comfortable_and_fits"]:
             comfort_suffix = (
                 f", and for a median household of that area the payment is comfortable in "
-                f"**{summary['n_comfortable']:,}** of them"
+                f"**{summary['n_comfortable_and_fits']:,}** of them"
             )
         st.markdown(
             f"You can afford a typical flat in **{summary['n_fits']:,} of "

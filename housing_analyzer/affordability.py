@@ -366,9 +366,20 @@ def affordability_summary(
     n_with_price = len(table)
     n_fits = int((table["budget_fit"] == BUDGET_FIT_WITHIN).sum()) if n_with_price else 0
     share = (100.0 * n_fits / n_with_price) if n_with_price else 0.0
+    has_payment_share = n_with_price and "payment_share_class" in table.columns
     n_comfortable = (
         int((table["payment_share_class"] == PAYMENT_SHARE_COMFORTABLE).sum())
-        if n_with_price and "payment_share_class" in table.columns
+        if has_payment_share
+        else 0
+    )
+    n_comfortable_and_fits = (
+        int(
+            (
+                (table["payment_share_class"] == PAYMENT_SHARE_COMFORTABLE)
+                & (table["budget_fit"] == BUDGET_FIT_WITHIN)
+            ).sum()
+        )
+        if has_payment_share
         else 0
     )
     return {
@@ -376,6 +387,7 @@ def affordability_summary(
         "n_fits": n_fits,
         "fit_share_pct": share,
         "n_comfortable": n_comfortable,
+        "n_comfortable_and_fits": n_comfortable_and_fits,
         "max_affordable_price": max_affordable_price,
     }
 

@@ -467,6 +467,36 @@ def test_affordability_summary_includes_comfortable_count(
     )
 
 
+def test_affordability_summary_comfortable_and_fits_is_scoped_to_budget_fit(
+    sample_prices_frame,
+):
+    demographics = pd.DataFrame(
+        {
+            "postal_code": ["00100", "00120"],
+            "median_household_income_eur": [20000.0, 200000.0],
+        }
+    )
+    table = affordability_table(
+        sample_prices_frame,
+        "2024Q4",
+        "1",
+        50.0,
+        400_000.0,
+        4.0,
+        25.0,
+        20.0,
+        True,
+        demographics_df=demographics,
+    )
+    summary = affordability_summary(table, max_affordable_price=400_000.0)
+    # 00100 fits the budget but isn't comfortable; 00120 is comfortable but
+    # doesn't fit the budget, so the intersection must be zero even though
+    # both n_fits and n_comfortable are non-zero.
+    assert summary["n_fits"] == 1
+    assert summary["n_comfortable"] == 1
+    assert summary["n_comfortable_and_fits"] == 0
+
+
 def test_prepare_payment_income_share_map_layer(
     sample_prices_frame, sample_boundaries, demographics_sample, cpi_df
 ):
