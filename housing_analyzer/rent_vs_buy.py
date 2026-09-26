@@ -23,6 +23,7 @@ from housing_analyzer.data.municipalities import (
     municipality_year_for_quarter,
 )
 from housing_analyzer.data.rents import rent_area_for_municipality
+from housing_analyzer.hybrid_map import postal_to_municipality_codes
 from housing_analyzer.map import (
     METRIC_GROSS_RENTAL_YIELD,
     METRIC_PRICE,
@@ -417,6 +418,7 @@ def prepare_gross_rental_yield_dataframe(
 
     rent_quarter = latest_rent_quarter(quarter, rents_df)
     rooms_code, _ = rent_rooms_for_building_type(building_type_code)
+    postal_municipality_codes = postal_to_municipality_codes(boundaries)
     yields: list[float] = []
     hovers: list[str] = []
 
@@ -425,8 +427,7 @@ def prepare_gross_rental_yield_dataframe(
         price = record.get("price_per_sqm")
         quote = None
         if rent_quarter is not None:
-            props = boundary_properties(boundaries, postal)
-            municipality_code = municipality_code_from_properties(props)
+            municipality_code = postal_municipality_codes.get(postal)
             if municipality_code is not None:
                 rent_area = rent_area_for_municipality(
                     municipality_code, region_map=region_map
@@ -445,7 +446,19 @@ def prepare_gross_rental_yield_dataframe(
         yields.append(yield_pct)
 
         if math.isnan(yield_pct):
-            hovers.append(format_hover_text(record, METRIC_PRICE))
+            if metric_is_missing(record, METRIC_PRICE):
+                hovers.append(format_hover_text(record, METRIC_PRICE))
+            else:
+                name = record.get("area_name") or ""
+                hovers.append(
+                    "<br>".join(
+                        [
+                            f"<b>{postal}</b> {name}",
+                            "Gross rental yield: no rent data for this area",
+                            f"Price per m²: {format_metric_value(float(price), METRIC_PRICE)}",
+                        ]
+                    )
+                )
         else:
             name = record.get("area_name") or ""
             rent_note = (
