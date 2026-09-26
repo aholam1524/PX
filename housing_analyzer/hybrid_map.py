@@ -14,6 +14,7 @@ from housing_analyzer.affordability import (
     BUDGET_FIT_OVER,
     BUDGET_FIT_STRETCH,
     BUDGET_FIT_WITHIN,
+    budget_ratio_and_category,
     classify_budget_fit_ratio,
     price_to_budget_ratio,
     typical_dwelling_price,
@@ -47,7 +48,6 @@ from housing_analyzer.map import (
     base_map_layout_kwargs,
     _PCT_CHANGE_METRICS,
     _REAL_CHANGE_METRICS,
-    _budget_ratio_and_category,
     _feature_subset,
     _reliability_outlines,
     _solid_colorscale,
@@ -234,7 +234,7 @@ def _municipality_metric_frame(
                 record["missing"] = True
             else:
                 typical = typical_dwelling_price(float(price), size_sqm)
-                ratio, category = _budget_ratio_and_category(typical, max_affordable_price)
+                ratio, category = budget_ratio_and_category(typical, max_affordable_price)
                 record["budget_fit"] = category
                 record["budget_ratio"] = ratio
                 record["missing"] = False
@@ -262,7 +262,7 @@ def format_municipality_hover_text(
             return f"{header}<br>No data for this building type and year."
         price_sqm = row.get("price_per_sqm")
         typical = typical_dwelling_price(float(price_sqm), size_sqm)
-        ratio, category = _budget_ratio_and_category(typical, max_affordable_price)
+        ratio, category = budget_ratio_and_category(typical, max_affordable_price)
         ratio_display = "∞" if math.isinf(ratio) else f"{ratio:.2f}"
         lines = [
             header,
