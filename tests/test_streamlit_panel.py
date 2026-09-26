@@ -255,14 +255,6 @@ def test_apptest_add_to_compare_duplicate_does_not_show_success(monkeypatch):
     at.run(timeout=60)
     assert not at.exception
 
-    if at.text_input:
-        at.text_input[0].set_value("00100").run(timeout=60)
-    if at.button:
-        for button in at.button:
-            if "Show selected area" in (button.label or ""):
-                button.click().run(timeout=60)
-                break
-
     add_buttons = [b for b in at.button if (b.key or "").startswith("add_compare_")]
     if not add_buttons:
         pytest.skip("Add to comparison button not available in this Streamlit version")
