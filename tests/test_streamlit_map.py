@@ -133,6 +133,45 @@ def test_apptest_map_and_compare_single_typeahead_search(monkeypatch):
     assert "01200" in body
 
 
+def test_apptest_map_click_syncs_search_box_and_ignores_out_of_range_code(monkeypatch):
+    """Clicking the map (simulated via ``selected_postal_code``) should update the
+    "Find an area" select box, but must not force it to a code that isn't one of
+    its own options (e.g. a postal code with no boundary geometry on the map)."""
+    apptest_mod = importlib.util.find_spec("streamlit.testing.v1")
+    if apptest_mod is None:
+        pytest.skip("streamlit.testing.v1.AppTest not available in this Streamlit version")
+
+    monkeypatch.setenv("HOUSING_USE_FIXTURES", "1")
+
+    from streamlit.testing.v1 import AppTest
+
+    at = AppTest.from_file(str(STREAMLIT_APP))
+    at.run(timeout=60)
+    assert not at.exception
+
+    if not at.tabs:
+        pytest.skip("AppTest tabs not available in this Streamlit version")
+
+    at.tabs[0].run(timeout=60)
+    assert not at.exception
+    assert at.session_state["map_area_search"] == "00100"
+
+    # Simulate a map click on "01200", which has boundary geometry and is one of
+    # the "Find an area" select box's own options: the box should follow the click.
+    at.session_state["selected_postal_code"] = "01200"
+    at.run(timeout=60)
+    assert not at.exception
+    assert at.session_state["map_area_search"] == "01200"
+
+    # Simulate a map click on "00120", which has price data but no boundary
+    # geometry in the fixtures, so it is absent from the select box's options.
+    # The box must keep its previous value instead of erroring or resetting.
+    at.session_state["selected_postal_code"] = "00120"
+    at.run(timeout=60)
+    assert not at.exception
+    assert at.session_state["map_area_search"] == "01200"
+
+
 def test_apptest_price_layer_full_range_checkbox(monkeypatch):
     apptest_mod = importlib.util.find_spec("streamlit.testing.v1")
     if apptest_mod is None:
