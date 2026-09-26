@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any, Sequence
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+
+_MUNICIPALITY_SUFFIX = re.compile(r"\(([^)]+)\)\s*$")
 
 from housing_analyzer.analysis.metrics import quarter_index, summarize_areas, to_real
 from housing_analyzer.data.cpi import cpi_by_quarter
@@ -26,6 +29,41 @@ def area_catalog(prices_df: pd.DataFrame) -> pd.DataFrame:
     )
     out = grouped.reset_index()
     out["area_name"] = out["area_name"].fillna("").astype(str)
+    return out
+
+
+def _area_label_text(area_name: str, municipality: str | None = None) -> str:
+    """Area name for search labels; append municipality when it is not already in the name."""
+    name = str(area_name or "").strip()
+    if _MUNICIPALITY_SUFFIX.search(name):
+        return name
+    muni = (municipality or "").strip()
+    if muni:
+        return f"{name} ({muni})" if name else f"({muni})"
+    return name
+
+
+def area_search_options(df: pd.DataFrame) -> list[tuple[str, str]]:
+    """Postal codes and searchable labels sorted by code (for Streamlit select/multiselect)."""
+    if df.empty:
+        return []
+    work = df.copy()
+    work["postal_code"] = work["postal_code"].astype(str).str.zfill(5)
+    work["area_name"] = work["area_name"].fillna("").astype(str)
+    if "municipality" in work.columns:
+        municipalities = work["municipality"].fillna("").astype(str)
+    else:
+        municipalities = pd.Series([""] * len(work), index=work.index)
+    work = work.assign(_municipality=municipalities)
+    work = work.drop_duplicates(subset=["postal_code"], keep="first").sort_values(
+        "postal_code"
+    )
+    out: list[tuple[str, str]] = []
+    for _, row in work.iterrows():
+        code = row["postal_code"]
+        body = _area_label_text(row["area_name"], row["_municipality"] or None)
+        label = f"{code} — {body}".strip(" —")
+        out.append((code, label))
     return out
 
 

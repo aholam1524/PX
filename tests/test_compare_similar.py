@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from housing_analyzer.analysis.compare import build_comparison_table
+from housing_analyzer.analysis.compare import area_search_options, build_comparison_table
 from housing_analyzer.analysis.similar_areas import SIMILARITY_FEATURES, similar_areas
 
 
@@ -209,3 +209,42 @@ def test_similarity_features_include_price_and_five_year_change():
     names = {name for name, _ in SIMILARITY_FEATURES}
     assert "price_per_sqm" in names
     assert "pct_change_5y" in names
+
+
+def test_area_search_options_label_format_sorting_and_municipality():
+    frame = pd.DataFrame(
+        {
+            "postal_code": ["02100", "00100", "00120", "02200"],
+            "area_name": [
+                "Tapiola (Espoo)",
+                "Helsinki keskusta - Etu-Töölö (Helsinki)",
+                "Punavuori",
+                "Unknown area",
+            ],
+            "municipality": ["Espoo", "Helsinki", "Helsinki", ""],
+        }
+    )
+    options = area_search_options(frame)
+    codes = [code for code, _ in options]
+    assert codes == ["00100", "00120", "02100", "02200"]
+    labels = dict(options)
+    assert labels["00100"] == "00100 — Helsinki keskusta - Etu-Töölö (Helsinki)"
+    assert labels["02100"] == "02100 — Tapiola (Espoo)"
+    assert labels["00120"] == "00120 — Punavuori (Helsinki)"
+    assert labels["02200"] == "02200 — Unknown area"
+    for label in labels.values():
+        assert " — " in label
+    assert "esp" in labels["02100"].lower()
+    assert "punavuori" in labels["00120"].lower()
+    assert "helsinki" in labels["00120"].lower()
+
+
+def test_area_search_options_without_municipality_column():
+    frame = pd.DataFrame(
+        {
+            "postal_code": ["00120"],
+            "area_name": ["Punavuori (Helsinki)"],
+        }
+    )
+    options = area_search_options(frame)
+    assert options == [("00120", "00120 — Punavuori (Helsinki)")]
