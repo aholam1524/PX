@@ -679,18 +679,21 @@ def _render_rent_vs_buy_tab(
     matches = search_area_matches(prices, search_query) if search_query.strip() else []
     if search_query.strip():
         if matches:
-            labels = [
-                f"{m['postal_code']} — {m.get('area_name') or ''}".strip(" —")
-                for m in matches[:20]
-            ]
-            picked_label = st.selectbox(
+            codes = matches[:20]
+
+            def _match_label(code: str) -> str:
+                hits = prices.loc[prices["postal_code"] == code, "area_name"]
+                area_name = hits.iloc[0] if not hits.empty else ""
+                return f"{code} — {area_name or ''}".strip(" —")
+
+            picked_code = st.selectbox(
                 "Matching areas",
-                options=labels,
+                options=codes,
+                format_func=_match_label,
                 key="rent_vs_buy_search_pick",
             )
             if st.button("Use searched area", key="rent_vs_buy_use_search"):
-                code = picked_label.split(" — ", 1)[0].strip()
-                st.session_state.selected_postal_code = code
+                st.session_state.selected_postal_code = picked_code
                 st.session_state.selected_map_level = "postal"
         else:
             st.caption("No areas match that search.")
