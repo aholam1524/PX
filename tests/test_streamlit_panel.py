@@ -299,6 +299,36 @@ def test_apptest_affordability_tab_with_fixtures(monkeypatch):
     )
     assert "Where can I afford to live" in body
     assert "Maximum affordable price" in body
+    assert "What if rates rise" in body
+    table_frames = [
+        el.value
+        for el in at.dataframe
+        if getattr(el, "value", None) is not None and hasattr(el.value, "columns")
+    ]
+    assert table_frames, "Expected affordability area table in AppTest"
+    assert "Household income (EUR/year)" in table_frames[0].columns
+
+
+def test_apptest_affordability_map_payment_share_layer(monkeypatch):
+    apptest_mod = importlib.util.find_spec("streamlit.testing.v1")
+    if apptest_mod is None:
+        pytest.skip("streamlit.testing.v1.AppTest not available in this Streamlit version")
+
+    monkeypatch.setenv("HOUSING_USE_FIXTURES", "1")
+
+    from streamlit.testing.v1 import AppTest
+
+    from housing_analyzer.map import METRIC_PAYMENT_INCOME_SHARE
+
+    at = AppTest.from_file(str(STREAMLIT_APP))
+    at.run(timeout=60)
+    assert not at.exception
+
+    metric_boxes = [el for el in at.selectbox if el.label == "Metric layer"]
+    if not metric_boxes:
+        pytest.skip("Map metric selectbox not available in this AppTest version")
+    metric_boxes[0].set_value(METRIC_PAYMENT_INCOME_SHARE).run(timeout=60)
+    assert not at.exception
 
 
 def test_apptest_affordability_tab_no_areas_fit(monkeypatch):

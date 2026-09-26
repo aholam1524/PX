@@ -13,25 +13,34 @@ from housing_analyzer.affordability import (
     BUDGET_FIT_OVER,
     BUDGET_FIT_STRETCH,
     BUDGET_FIT_WITHIN,
+    PAYMENT_SHARE_COMFORTABLE,
+    PAYMENT_SHARE_NO_DATA,
+    PAYMENT_SHARE_STRETCHED,
+    PAYMENT_SHARE_HARD,
     affordability_summary,
     affordability_table,
     budget_ratio_and_category,
     classify_budget_fit_ratio,
+    classify_payment_share,
     filter_affordability_table,
     loan_amount,
     max_price,
     monthly_payment,
+    payment_to_income,
     price_to_budget_ratio,
     sort_affordability_table,
+    stress_test,
     total_interest,
     typical_dwelling_price,
 )
 from housing_analyzer.data.prices import parse_json_stat2
 from housing_analyzer.map import (
     METRIC_FITS_BUDGET,
+    METRIC_PAYMENT_INCOME_SHARE,
     build_choropleth_figure,
     format_budget_fit_hover,
     prepare_budget_fit_dataframe,
+    prepare_payment_income_share_dataframe,
 )
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -47,6 +56,11 @@ def sample_prices_frame() -> pd.DataFrame:
 def sample_boundaries() -> dict:
     with (FIXTURES / "boundaries_sample.geojson").open(encoding="utf-8") as handle:
         return json.load(handle)
+
+
+@pytest.fixture
+def demographics_sample() -> pd.DataFrame:
+    return pd.read_csv(FIXTURES / "demographics_sample.csv")
 
 
 @pytest.fixture
@@ -346,6 +360,154 @@ def test_affordability_table_matches_budget_map_layer(
         assert row["budget_ratio"] == pytest.approx(
             table.loc[code, "budget_ratio"], rel=1e-9, nan_ok=True
         )
+
+
+def test_payment_to_income_hand_calculated():
+    monthly = 1000.0
+    annual = 48_000.0
+    assert payment_to_income(monthly, annual) == pytest.approx(0.25)
+
+
+def test_payment_to_income_missing_and_zero_income():
+    assert np.isnan(payment_to_income(1000.0, float("nan")))
+    assert np.isnan(payment_to_income(1000.0, 0.0))
+    assert np.isnan(payment_to_income(1000.0, -1.0))
+    assert np.isnan(payment_to_income(float("nan"), 50_000.0))
+
+
+def test_classify_payment_share_boundaries():
+    assert classify_payment_share(0.30) == PAYMENT_SHARE_COMFORTABLE
+    assert classify_payment_share(0.3000001) == PAYMENT_SHARE_STRETCHED
+    assert classify_payment_share(0.40) == PAYMENT_SHARE_STRETCHED
+    assert classify_payment_share(0.4000001) == PAYMENT_SHARE_HARD
+    assert classify_payment_share(float("nan")) == PAYMENT_SHARE_NO_DATA
+
+
+def test_stress_test_rate_zero_and_income_shock():
+    price = 200_000.0
+    down = 40_000.0
+    rate = 4.0
+    years = 25.0
+    income = 60_000.0
+    base = stress_test(price, down, rate, years, income)
+    assert base.iloc[0]["rate_step_pp"] == 0
+    assert base.iloc[0]["monthly_payment"] == pytest.approx(
+        monthly_payment(loan_amount(price, down), rate, years), rel=1e-6
+    )
+    shocked = stress_test(price, down, rate, years, income, income_shock_pct=-10)
+    assert shocked.iloc[0]["payment_income_share"] == pytest.approx(
+        base.iloc[0]["payment_income_share"] / 0.9, rel=1e-6
+    )
+    assert len(base) == 4
+    assert list(base["rate_step_pp"]) == [0, 1, 2, 3]
+
+
+def test_affordability_table_household_income_columns(
+    sample_prices_frame, demographics_sample
+):
+    table = affordability_table(
+        sample_prices_frame,
+        "2024Q4",
+        "1",
+        50.0,
+        500_000.0,
+        4.0,
+        25.0,
+        20.0,
+        True,
+        demographics_df=demographics_sample,
+    )
+    row = table.loc[table["postal_code"] == "00100"].iloc[0]
+    assert row["median_household_income_eur"] == pytest.approx(52_000.0)
+    expected_share = payment_to_income(row["monthly_payment"], 52_000.0)
+    assert row["payment_income_share"] == pytest.approx(expected_share, rel=1e-6)
+    assert row["payment_share_class"] == classify_payment_share(expected_share)
+
+    no_income = table.loc[table["postal_code"] == "00120"].iloc[0]
+    assert pd.isna(no_income["median_household_income_eur"])
+    assert pd.isna(no_income["payment_income_share"])
+    assert no_income["payment_share_class"] == PAYMENT_SHARE_NO_DATA
+
+
+def test_filter_only_comfortable(sample_prices_frame, demographics_sample):
+    table = affordability_table(
+        sample_prices_frame,
+        "2024Q4",
+        "1",
+        50.0,
+        500_000.0,
+        4.0,
+        25.0,
+        20.0,
+        True,
+        demographics_df=demographics_sample,
+    )
+    comfortable = filter_affordability_table(table, only_comfortable=True)
+    assert (comfortable["payment_share_class"] == PAYMENT_SHARE_COMFORTABLE).all()
+
+
+def test_affordability_summary_includes_comfortable_count(
+    sample_prices_frame, demographics_sample
+):
+    table = affordability_table(
+        sample_prices_frame,
+        "2024Q4",
+        "1",
+        50.0,
+        500_000.0,
+        4.0,
+        25.0,
+        20.0,
+        True,
+        demographics_df=demographics_sample,
+    )
+    summary = affordability_summary(table, max_affordable_price=500_000.0)
+    assert summary["n_comfortable"] == int(
+        (table["payment_share_class"] == PAYMENT_SHARE_COMFORTABLE).sum()
+    )
+
+
+def test_prepare_payment_income_share_map_layer(
+    sample_prices_frame, sample_boundaries, demographics_sample, cpi_df
+):
+    size_sqm = 50.0
+    frame = prepare_payment_income_share_dataframe(
+        sample_prices_frame,
+        sample_boundaries,
+        "2024Q4",
+        "1",
+        size_sqm,
+        annual_rate_pct=4.0,
+        years=25.0,
+        down_payment_value=20.0,
+        use_percent=True,
+        cpi_df=cpi_df,
+        demographics_df=demographics_sample,
+    )
+    row_ok = frame.loc[frame["postal_code"] == "00100"].iloc[0]
+    assert not bool(row_ok["missing"])
+    assert row_ok[METRIC_PAYMENT_INCOME_SHARE] == pytest.approx(
+        payment_to_income(
+            monthly_payment(
+                loan_amount(
+                    typical_dwelling_price(float(row_ok["price_per_sqm"]), size_sqm),
+                    typical_dwelling_price(float(row_ok["price_per_sqm"]), size_sqm)
+                    * 0.2,
+                ),
+                4.0,
+                25.0,
+            ),
+            52_000.0,
+        ),
+        rel=1e-6,
+    )
+
+    missing_row = frame.loc[frame["postal_code"] == "01200"].iloc[0]
+    assert bool(missing_row["missing"])
+    assert pd.isna(missing_row[METRIC_PAYMENT_INCOME_SHARE])
+
+    fig = build_choropleth_figure(frame, sample_boundaries, METRIC_PAYMENT_INCOME_SHARE)
+    assert fig.data
 
 
 def test_classify_at_exact_budget_and_twenty_percent_over():
