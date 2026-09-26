@@ -215,6 +215,28 @@ def test_affordability_table_typical_price_payment_and_headroom(sample_prices_fr
     )
 
 
+def test_affordability_table_fixed_eur_down_payment_over_typical_price(
+    sample_prices_frame,
+):
+    """EUR-mode down payment above a cheap area's price must not raise."""
+    size_sqm = 50.0
+    max_aff = 400_000.0
+    table = affordability_table(
+        sample_prices_frame,
+        "2024Q4",
+        "1",
+        size_sqm,
+        max_aff,
+        4.0,
+        25.0,
+        1_000_000.0,
+        False,
+    )
+    assert not table.empty
+    assert (table["budget_fit"] == BUDGET_FIT_OVER).all()
+    assert table["monthly_payment"].isna().all()
+
+
 def test_budget_ratio_and_category_at_max_and_twenty_percent_over():
     max_aff = 100_000.0
     assert budget_ratio_and_category(100_000.0, max_aff) == (
