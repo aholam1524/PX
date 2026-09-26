@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 import json
 import re
 import time
@@ -718,8 +719,6 @@ def _read_national_demographics_snapshot(path: Path | None = None) -> pd.Series:
 
 
 def gzip_open_text(path: Path):
-    import gzip
-
     return gzip.open(path, "rt", encoding="utf-8")
 
 
@@ -834,8 +833,6 @@ def load_national_demographics(*, refresh: bool = False) -> pd.Series:
 
 
 def write_national_demographics_snapshot(national: pd.Series, path: Path) -> int:
-    import gzip
-
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = national.to_dict()
     with gzip.open(path, "wt", encoding="utf-8") as handle:
