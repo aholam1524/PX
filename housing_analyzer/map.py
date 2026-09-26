@@ -23,8 +23,8 @@ from housing_analyzer.affordability import (
     BUDGET_FIT_OVER,
     BUDGET_FIT_STRETCH,
     BUDGET_FIT_WITHIN,
-    classify_budget_fit_ratio,
-    price_to_budget_ratio,
+    affordability_table,
+    budget_ratio_and_category,
     typical_dwelling_price,
 )
 
@@ -468,18 +468,6 @@ def prepare_map_dataframe(
     return pd.DataFrame(records)
 
 
-def _budget_ratio_and_category(
-    typical_price: float, max_affordable_price: float
-) -> tuple[float, str]:
-    """Ratio/category for one area, treating a non-positive budget as unaffordable
-    rather than raising (a 0 EUR max affordable price is a valid user input, e.g.
-    100% down payment)."""
-    if max_affordable_price <= 0:
-        return float("inf"), BUDGET_FIT_OVER
-    ratio = price_to_budget_ratio(typical_price, max_affordable_price)
-    return ratio, classify_budget_fit_ratio(ratio)
-
-
 def format_budget_fit_hover(
     row: Mapping[str, Any],
     *,
@@ -498,7 +486,7 @@ def format_budget_fit_hover(
             f"Reliability: {reliability_display(row.get('reliability'))}"
         )
     typical = typical_dwelling_price(float(price_sqm), size_sqm)
-    ratio, category = _budget_ratio_and_category(typical, max_affordable_price)
+    ratio, category = budget_ratio_and_category(typical, max_affordable_price)
     ratio_display = "∞" if math.isinf(ratio) else f"{ratio:.2f}"
     lines = [
         f"<b>{postal}</b> {name}",
@@ -521,6 +509,10 @@ def prepare_budget_fit_dataframe(
     size_sqm: float,
     max_affordable_price: float,
     *,
+    annual_rate_pct: float = 0.0,
+    years: float = 25.0,
+    down_payment_value: float = 0.0,
+    use_percent: bool = False,
     cpi_df: pd.DataFrame | None = None,
     demographics_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
@@ -537,24 +529,31 @@ def prepare_budget_fit_dataframe(
     if base.empty:
         return base
 
+    afford = affordability_table(
+        prices_df,
+        quarter,
+        building_type_code,
+        size_sqm,
+        max_affordable_price,
+        annual_rate_pct,
+        years,
+        down_payment_value,
+        use_percent,
+    ).set_index("postal_code")
+
     records: list[dict[str, Any]] = []
     for row in base.to_dict("records"):
-        price_sqm = row.get("price_per_sqm")
-        missing_price = price_sqm is None or (
-            isinstance(price_sqm, float) and np.isnan(price_sqm)
-        ) or pd.isna(price_sqm)
-        if missing_price:
-            category = None
-            ratio = float("nan")
-            missing = True
-        else:
-            typical = typical_dwelling_price(float(price_sqm), size_sqm)
-            ratio, category = _budget_ratio_and_category(typical, max_affordable_price)
-            missing = False
+        code = str(row.get("postal_code", "")).zfill(5)
         record = dict(row)
-        record["budget_ratio"] = ratio
-        record["budget_fit"] = category
-        record["missing"] = missing
+        if code in afford.index:
+            fit_row = afford.loc[code]
+            record["budget_ratio"] = fit_row["budget_ratio"]
+            record["budget_fit"] = fit_row["budget_fit"]
+            record["missing"] = False
+        else:
+            record["budget_ratio"] = float("nan")
+            record["budget_fit"] = None
+            record["missing"] = True
         record["hover"] = format_budget_fit_hover(
             row,
             max_affordable_price=max_affordable_price,

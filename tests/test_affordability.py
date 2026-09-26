@@ -13,12 +13,18 @@ from housing_analyzer.affordability import (
     BUDGET_FIT_OVER,
     BUDGET_FIT_STRETCH,
     BUDGET_FIT_WITHIN,
+    affordability_summary,
+    affordability_table,
+    budget_ratio_and_category,
     classify_budget_fit_ratio,
+    filter_affordability_table,
     loan_amount,
     max_price,
     monthly_payment,
     price_to_budget_ratio,
+    sort_affordability_table,
     total_interest,
+    typical_dwelling_price,
 )
 from housing_analyzer.data.prices import parse_json_stat2
 from housing_analyzer.map import (
@@ -180,6 +186,166 @@ def test_format_budget_fit_hover_zero_budget_is_over_not_error():
     hover = format_budget_fit_hover(row, max_affordable_price=0.0, size_sqm=50.0)
     assert "More than 20% over budget" in hover
     assert "Max affordable: 0 EUR" in hover
+
+
+def test_affordability_table_typical_price_payment_and_headroom(sample_prices_frame):
+    size_sqm = 50.0
+    price_sqm = 7590.0
+    max_aff = 400_000.0
+    table = affordability_table(
+        sample_prices_frame,
+        "2024Q4",
+        "1",
+        size_sqm,
+        max_aff,
+        4.0,
+        25.0,
+        20.0,
+        True,
+    )
+    row = table.loc[table["postal_code"] == "00100"].iloc[0]
+    typical = typical_dwelling_price(price_sqm, size_sqm)
+    assert row["typical_price"] == pytest.approx(typical)
+    assert row["price_per_sqm"] == pytest.approx(price_sqm)
+    assert row["headroom"] == pytest.approx(max_aff - typical)
+    down = typical * 0.2
+    principal = loan_amount(typical, down)
+    assert row["monthly_payment"] == pytest.approx(
+        monthly_payment(principal, 4.0, 25.0), rel=1e-6
+    )
+
+
+def test_affordability_table_fixed_eur_down_payment_over_typical_price(
+    sample_prices_frame,
+):
+    """EUR-mode down payment above a cheap area's price must not raise."""
+    size_sqm = 50.0
+    max_aff = 400_000.0
+    table = affordability_table(
+        sample_prices_frame,
+        "2024Q4",
+        "1",
+        size_sqm,
+        max_aff,
+        4.0,
+        25.0,
+        1_000_000.0,
+        False,
+    )
+    assert not table.empty
+    assert (table["budget_fit"] == BUDGET_FIT_OVER).all()
+    assert table["monthly_payment"].isna().all()
+
+
+def test_budget_ratio_and_category_at_max_and_twenty_percent_over():
+    max_aff = 100_000.0
+    assert budget_ratio_and_category(100_000.0, max_aff) == (
+        pytest.approx(1.0),
+        BUDGET_FIT_WITHIN,
+    )
+    assert budget_ratio_and_category(120_000.0, max_aff) == (
+        pytest.approx(1.2),
+        BUDGET_FIT_STRETCH,
+    )
+    assert budget_ratio_and_category(120_001.0, max_aff)[1] == BUDGET_FIT_OVER
+
+
+def test_affordability_summary_counts_and_shares(sample_prices_frame):
+    table = affordability_table(
+        sample_prices_frame,
+        "2024Q4",
+        "1",
+        50.0,
+        500_000.0,
+        4.0,
+        25.0,
+        20.0,
+        True,
+    )
+    summary = affordability_summary(table, max_affordable_price=500_000.0)
+    assert summary["n_with_price"] == 2
+    assert summary["n_fits"] == 2
+    assert summary["fit_share_pct"] == pytest.approx(100.0)
+
+    none_fit = affordability_table(
+        sample_prices_frame,
+        "2024Q4",
+        "1",
+        60.0,
+        200_000.0,
+        4.0,
+        25.0,
+        20.0,
+        True,
+    )
+    none_summary = affordability_summary(none_fit, max_affordable_price=200_000.0)
+    assert none_summary["n_fits"] == 0
+    assert none_summary["fit_share_pct"] == pytest.approx(0.0)
+
+
+def test_filter_and_sort_affordability_table(sample_prices_frame):
+    table = affordability_table(
+        sample_prices_frame,
+        "2024Q4",
+        "1",
+        50.0,
+        500_000.0,
+        4.0,
+        25.0,
+        20.0,
+        True,
+    )
+    only = filter_affordability_table(table, only_fits=True)
+    assert len(only) == 2
+    assert set(only["budget_fit"]) == {BUDGET_FIT_WITHIN}
+
+    helsinki = filter_affordability_table(
+        table, municipalities=["Helsinki"]
+    )
+    assert set(helsinki["postal_code"]) == {"00100", "00120"}
+
+    sorted_table = sort_affordability_table(table)
+    assert sorted_table.iloc[0]["budget_fit"] == BUDGET_FIT_WITHIN
+    assert sorted_table["price_per_sqm"].is_monotonic_increasing
+
+
+def test_affordability_table_matches_budget_map_layer(
+    sample_prices_frame, sample_boundaries, cpi_df
+):
+    size_sqm = 50.0
+    max_aff = 300_000.0
+    rate = 4.5
+    years = 25.0
+    table = affordability_table(
+        sample_prices_frame,
+        "2024Q4",
+        "1",
+        size_sqm,
+        max_aff,
+        rate,
+        years,
+        20.0,
+        True,
+    ).set_index("postal_code")
+    frame = prepare_budget_fit_dataframe(
+        sample_prices_frame,
+        sample_boundaries,
+        "2024Q4",
+        "1",
+        size_sqm,
+        max_aff,
+        annual_rate_pct=rate,
+        years=years,
+        down_payment_value=20.0,
+        use_percent=True,
+        cpi_df=cpi_df,
+    )
+    for _, row in frame.loc[~frame["missing"]].iterrows():
+        code = str(row["postal_code"]).zfill(5)
+        assert row["budget_fit"] == table.loc[code, "budget_fit"]
+        assert row["budget_ratio"] == pytest.approx(
+            table.loc[code, "budget_ratio"], rel=1e-9, nan_ok=True
+        )
 
 
 def test_classify_at_exact_budget_and_twenty_percent_over():

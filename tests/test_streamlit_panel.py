@@ -277,8 +277,52 @@ def test_apptest_affordability_tab_with_fixtures(monkeypatch):
 
     body = " ".join(
         getattr(el, "value", "") or ""
-        for group in (at.subheader, at.info, at.metric)
+        for group in (at.subheader, at.markdown, at.caption)
         for el in group
     )
-    assert "Affordability" in body
-    assert "illustration" in body.lower() or "not financial advice" in body.lower()
+    assert "Where can I afford to live" in body
+    assert "Maximum affordable price" in body
+
+
+def test_apptest_affordability_tab_no_areas_fit(monkeypatch):
+    apptest_mod = importlib.util.find_spec("streamlit.testing.v1")
+    if apptest_mod is None:
+        pytest.skip("streamlit.testing.v1.AppTest not available in this Streamlit version")
+
+    monkeypatch.setenv("HOUSING_USE_FIXTURES", "1")
+
+    from streamlit.testing.v1 import AppTest
+
+    at = AppTest.from_file(str(STREAMLIT_APP))
+    at.run(timeout=60)
+    assert not at.exception
+    if not at.tabs or len(at.tabs) < 2:
+        pytest.skip("Affordability tab not available in this AppTest version")
+
+    at.number_input(key="afford_monthly_budget").set_value(1.0).run(timeout=60)
+    at.tabs[1].run(timeout=60)
+    assert not at.exception
+    body = " ".join(getattr(el, "value", "") or "" for el in at.markdown)
+    assert "No areas fit" in body
+
+
+def test_apptest_affordability_tab_after_size_change(monkeypatch):
+    apptest_mod = importlib.util.find_spec("streamlit.testing.v1")
+    if apptest_mod is None:
+        pytest.skip("streamlit.testing.v1.AppTest not available in this Streamlit version")
+
+    monkeypatch.setenv("HOUSING_USE_FIXTURES", "1")
+
+    from streamlit.testing.v1 import AppTest
+
+    at = AppTest.from_file(str(STREAMLIT_APP))
+    at.run(timeout=60)
+    assert not at.exception
+    if not at.tabs or len(at.tabs) < 2:
+        pytest.skip("Affordability tab not available in this AppTest version")
+
+    at.number_input(key="afford_size_sqm").set_value(40.0).run(timeout=60)
+    at.tabs[1].run(timeout=60)
+    assert not at.exception
+    body = " ".join(getattr(el, "value", "") or "" for el in at.markdown)
+    assert "40 m²" in body
