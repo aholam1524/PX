@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import logging
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -56,6 +57,7 @@ from housing_analyzer.data.municipalities import (
     build_municipality_boundaries,
     fetch_municipality_prices,
     load_municipality_prices,
+    municipality_codes_from_boundaries,
     municipality_join_report,
 )
 from housing_analyzer.data.prices import API_URL, fetch_prices, load_prices
@@ -67,8 +69,11 @@ from housing_analyzer.data.rents import (
     fetch_rents,
     load_municipality_region_map,
     load_rents,
+    municipality_numbers_missing_from_region_map,
     write_municipality_region_snapshot,
 )
+
+logger = logging.getLogger(__name__)
 
 DEMOGRAPHICS_SOURCE_NOTE = (
     f"{PAAVO_BASE} — tables 12ey, 12f1, 12ez, 12f2, 12f3, 12f4, 12f6 "
@@ -413,6 +418,17 @@ def build_snapshot(*, refresh: bool = True) -> dict[str, Any]:
         municipality_boundaries, municipality_prices
     )
     municipality_join_report(municipality_prices, municipality_boundaries)
+
+    missing_from_region_map = municipality_numbers_missing_from_region_map(
+        municipality_codes_from_boundaries(municipality_boundaries),
+        municipality_region,
+    )
+    if missing_from_region_map:
+        logger.warning(
+            "Municipality numbers missing from the region correspondence (%d): %s",
+            len(missing_from_region_map),
+            ", ".join(missing_from_region_map),
+        )
 
     return write_snapshot(
         prices,

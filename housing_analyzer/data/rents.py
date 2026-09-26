@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import time
 from collections.abc import Callable, Sequence
@@ -49,11 +50,16 @@ MEASURES = (
 
 GREATER_HELSINKI_MUNICIPALITIES = frozenset({"091", "049", "092", "235"})
 
+# Former Itä-Uusimaa (MK03) was merged into Uusimaa (MK01) in 2011.
+DEFAULT_RENT_REGION_CODES = frozenset(f"MK{i:02d}" for i in range(1, 20) if i != 3)
+
 _CITY_AREA_CODE_RE = re.compile(r"^\d{3}$")
 _REGION_AREA_CODE_RE = re.compile(r"^MK\d{2}$")
 
 CACHE_DIR = data_paths.RAW_DIR
 CACHE_FILE = CACHE_DIR / "rents.pkl"
+
+logger = logging.getLogger(__name__)
 
 
 def _normalize_municipality_number(value: Any) -> str | None:
@@ -105,6 +111,23 @@ def rent_region_codes_from_metadata(metadata: dict[str, Any]) -> frozenset[str]:
             if _REGION_AREA_CODE_RE.match(str(value))
         )
     return frozenset()
+
+
+def _log_rent_city_code_drift(metadata: dict[str, Any]) -> None:
+    """Warn when the live rent-area metadata disagrees with the hardcoded city list."""
+    live_cities = rent_city_codes_from_metadata(metadata)
+    if not live_cities:
+        return
+    default_cities = _default_rent_city_codes()
+    missing = sorted(default_cities - live_cities)
+    added = sorted(live_cities - default_cities)
+    if missing or added:
+        logger.warning(
+            "Rent city area codes drifted from the hardcoded default list "
+            "(missing from live metadata: %s; new in live metadata: %s)",
+            ", ".join(missing) or "none",
+            ", ".join(added) or "none",
+        )
 
 
 def _default_post(url: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -297,6 +320,8 @@ def fetch_rents(
     except requests.RequestException as exc:
         raise PxWebError(f"Could not reach Statistics Finland PxWeb API: {exc}") from exc
 
+    _log_rent_city_code_drift(metadata)
+
     max_cells = read_max_cells(metadata)
     quarters = _metadata_variable_values(metadata, VAR_TIME)
     funding = _metadata_variable_values(metadata, VAR_FUNDING)
@@ -359,9 +384,7 @@ def fetch_municipality_region_map(
     if not isinstance(entries, list):
         raise PxWebError(f"Unexpected classifications response: {entries!r}")
 
-    regions = rent_regions or frozenset(
-        f"MK{i:02d}" for i in range(1, 20) if i != 3
-    )
+    regions = rent_regions or DEFAULT_RENT_REGION_CODES
     rows: list[dict[str, str]] = []
     for entry in entries:
         if not isinstance(entry, dict):
