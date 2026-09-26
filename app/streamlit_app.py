@@ -313,12 +313,8 @@ def _add_to_compare(postal_code: str) -> bool:
     return True
 
 
-def _format_compare_option(catalog: pd.DataFrame, code: str) -> str:
-    norm = str(code).zfill(5)
-    for postal_code, label in area_search_options(catalog):
-        if postal_code == norm:
-            return label
-    return norm
+def _compare_option_labels(catalog: pd.DataFrame) -> dict[str, str]:
+    return dict(area_search_options(catalog))
 
 
 def _affordability_sidebar_inputs() -> dict[str, float | bool | str]:
@@ -843,11 +839,12 @@ def _render_my_home_tab(
     if search_hits:
         options = search_hits + [c for c in options if c not in search_hits]
     default_index = options.index(default_code) if default_code in options else 0
+    option_labels = _compare_option_labels(catalog)
     postal_code = st.selectbox(
         "Postal code",
         options=options,
         index=default_index,
-        format_func=lambda c: _format_compare_option(catalog, c),
+        format_func=lambda c: option_labels.get(c, c),
         key="my_home_postal",
     )
 
@@ -1076,10 +1073,11 @@ def _render_compare_tab(
     st.caption(similar_areas_explanation())
     if st.session_state.get("similar_for") not in selected:
         st.session_state.similar_for = selected[0]
+    similar_option_labels = _compare_option_labels(catalog)
     similar_for = st.selectbox(
         "Similar areas for",
         options=selected,
-        format_func=lambda c: _format_compare_option(catalog, c),
+        format_func=lambda c: similar_option_labels.get(c, c),
         key="similar_for",
     )
     matches = similar_areas(summaries, similar_for)
@@ -1679,9 +1677,7 @@ with map_tab:
                 str
             ).str.zfill(5)
             map_search_df["municipality"] = map_search_df["postal_code"].map(
-                lambda c: postal_names.get(c, ("", ""))[1]
-                or municipality_name_from_prices(prices, c)
-                or ""
+                lambda c: postal_names.get(c, ("", ""))[1] or ""
             )
         map_search = area_search_options(map_search_df)
         map_search_codes = [code for code, _ in map_search]
