@@ -10,6 +10,7 @@ _repo_root = str(Path(__file__).resolve().parents[1])
 if _repo_root not in sys.path:
     sys.path.insert(0, _repo_root)
 
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -51,6 +52,9 @@ from housing_analyzer.home_value import (
 )
 from housing_analyzer.affordability import (
     AFFORDABILITY_DISCLAIMER,
+    PAYMENT_SHARE_LABELS,
+    PAYMENT_SHARE_NO_DATA,
+    PAYMENT_SHARE_RULES_NOTE,
     affordability_summary,
     affordability_table,
     down_payment_from_inputs,
@@ -59,6 +63,7 @@ from housing_analyzer.affordability import (
     max_price,
     monthly_payment,
     sort_affordability_table,
+    stress_test,
     total_interest,
 )
 from housing_analyzer.hybrid_map import (
@@ -85,6 +90,7 @@ from housing_analyzer.map import (
     METRIC_FITS_BUDGET,
     METRIC_GROSS_RENTAL_YIELD,
     METRIC_MARKET_ACTIVITY,
+    METRIC_PAYMENT_INCOME_SHARE,
     METRIC_PRICE,
     build_choropleth_figure,
     count_areas_with_published_price,
@@ -94,6 +100,7 @@ from housing_analyzer.map import (
     metric_color_range,
     postal_code_from_selection,
     prepare_budget_fit_dataframe,
+    prepare_payment_income_share_dataframe,
     plotly_map_chart_config,
     prepare_map_dataframe,
     quarter_meets_coverage_threshold,
@@ -213,6 +220,20 @@ def _cached_map_frame(
             building_type_code,
             size_sqm,
             max_affordable_price,
+            annual_rate_pct=annual_rate_pct,
+            years=loan_years,
+            down_payment_value=down_payment_value,
+            use_percent=down_use_percent,
+            cpi_df=_cpi,
+            demographics_df=_demographics,
+        )
+    if metric == METRIC_PAYMENT_INCOME_SHARE:
+        return prepare_payment_income_share_dataframe(
+            _prices,
+            _boundaries,
+            quarter,
+            building_type_code,
+            size_sqm,
             annual_rate_pct=annual_rate_pct,
             years=loan_years,
             down_payment_value=down_payment_value,
@@ -405,6 +426,7 @@ def _affordability_sidebar_caption(afford: dict[str, float | bool | str]) -> str
 @st.cache_data(show_spinner=False)
 def _cached_affordability_table(
     _prices,
+    _demographics,
     quarter,
     building_type_code,
     size_sqm,
@@ -424,13 +446,31 @@ def _cached_affordability_table(
         loan_years,
         down_payment_value,
         down_use_percent,
+        demographics_df=_demographics,
     )
+
+
+def _format_household_income_cell(row: pd.Series) -> str:
+    income = row.get("median_household_income_eur")
+    if income is None or (isinstance(income, float) and np.isnan(income)) or pd.isna(income):
+        return "—"
+    return f"{float(income):,.0f}"
+
+
+def _format_payment_share_cell(row: pd.Series) -> str:
+    share = row.get("payment_income_share")
+    if share is None or (isinstance(share, float) and np.isnan(share)) or pd.isna(share):
+        return "—"
+    return f"{float(share) * 100:.1f} %"
 
 
 def _affordability_table_display_frame(table: pd.DataFrame) -> pd.DataFrame:
     display = table.copy()
     display["fit"] = display["budget_fit"].map(BUDGET_FIT_LABELS)
     display["reliability"] = display["reliability"].map(reliability_display)
+    display["Household income (EUR/year)"] = display.apply(_format_household_income_cell, axis=1)
+    display["Payment share"] = display.apply(_format_payment_share_cell, axis=1)
+    display["Income class"] = display["payment_share_class"].map(PAYMENT_SHARE_LABELS)
     return display[
         [
             "postal_code",
@@ -439,6 +479,9 @@ def _affordability_table_display_frame(table: pd.DataFrame) -> pd.DataFrame:
             "typical_price",
             "price_per_sqm",
             "fit",
+            "Household income (EUR/year)",
+            "Payment share",
+            "Income class",
             "monthly_payment",
             "headroom",
             "pct_change_1y",
@@ -460,6 +503,19 @@ def _affordability_table_display_frame(table: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def _stress_test_display_frame(stress_df: pd.DataFrame) -> pd.DataFrame:
+    out = stress_df.copy()
+    out["Rate"] = out["annual_rate_pct"].map(lambda r: f"{r:g} %")
+    out["Monthly payment (EUR)"] = out["monthly_payment"].map(
+        lambda p: "—" if pd.isna(p) else f"{float(p):,.2f}"
+    )
+    out["Payment share"] = out["payment_income_share"].map(
+        lambda s: "—" if pd.isna(s) else f"{float(s) * 100:.1f} %"
+    )
+    out["Class"] = out["payment_share_class"].map(PAYMENT_SHARE_LABELS)
+    return out[["Rate", "Monthly payment (EUR)", "Payment share", "Class"]]
+
+
 def _postal_from_affordability_selection(
     sorted_table: pd.DataFrame, selection: Any
 ) -> str | None:
@@ -476,6 +532,7 @@ def _postal_from_affordability_selection(
 
 def _render_affordability_tab(
     prices: pd.DataFrame,
+    demographics: pd.DataFrame,
     quarter: str,
     building_type_code: str | None,
     afford: dict[str, float | bool | str],
@@ -490,6 +547,7 @@ def _render_affordability_tab(
     max_affordable = _compute_max_affordable(afford)
     table = _cached_affordability_table(
         prices,
+        demographics,
         quarter,
         building_type_code,
         float(afford["size_sqm"]),
@@ -508,10 +566,16 @@ def _render_affordability_tab(
     if summary["n_with_price"] == 0:
         st.warning("No areas have a published price for this quarter and building type.")
     elif summary["n_fits"]:
+        comfort_suffix = ""
+        if summary["n_comfortable_and_fits"]:
+            comfort_suffix = (
+                f", and for a median household of that area the payment is comfortable in "
+                f"**{summary['n_comfortable_and_fits']:,}** of them"
+            )
         st.markdown(
             f"You can afford a typical flat in **{summary['n_fits']:,} of "
             f"{summary['n_with_price']:,} areas** that have a price "
-            f"({summary['fit_share_pct']:.0f} %). Maximum affordable price: "
+            f"({summary['fit_share_pct']:.0f} %){comfort_suffix}. Maximum affordable price: "
             f"**{max_affordable:,.0f} EUR** (about **{per_sqm_cap:,.0f} EUR/m²** for "
             f"{afford['size_sqm']:g} m²)."
         )
@@ -521,6 +585,16 @@ def _render_affordability_tab(
             "Try a **higher monthly budget**, a **smaller apartment size**, or a "
             f"**larger down payment**. Maximum affordable price: **{max_affordable:,.0f} EUR** "
             f"(about **{per_sqm_cap:,.0f} EUR/m²** for {afford['size_sqm']:g} m²)."
+        )
+    if (
+        summary["n_with_price"]
+        and not summary["n_fits"]
+        and summary["n_comfortable"]
+    ):
+        st.markdown(
+            f"For a **median household** in each area, the payment would be comfortable "
+            f"(≤30 % of income) in **{summary['n_comfortable']:,} of "
+            f"{summary['n_with_price']:,} areas** with a price."
         )
 
     if (
@@ -535,14 +609,20 @@ def _render_affordability_tab(
     municipality_options = sorted(
         {m for m in table["municipality"].dropna().astype(str) if m.strip()}
     )
-    filter_col1, filter_col2, filter_col3 = st.columns(3)
+    filter_col1, filter_col2, filter_col3, filter_col4 = st.columns(4)
     with filter_col1:
         only_fits = st.checkbox("Only areas that fit", value=True, key="afford_only_fits")
     with filter_col2:
+        only_comfortable = st.checkbox(
+            "Only areas that are comfortable for a median household",
+            value=False,
+            key="afford_only_comfortable",
+        )
+    with filter_col3:
         hide_low = st.checkbox(
             "Hide low-reliability areas", value=False, key="afford_hide_low"
         )
-    with filter_col3:
+    with filter_col4:
         municipality_filter = st.multiselect(
             "Municipality",
             options=municipality_options,
@@ -551,9 +631,22 @@ def _render_affordability_tab(
             placeholder="All municipalities",
         )
 
+    income_years = {
+        y
+        for y in table.get("household_income_data_year", pd.Series(dtype=float)).dropna().unique()
+    }
+    income_year_help = (
+        f"Paavo median disposable household income (EUR/year); "
+        f"reference year{'s' if len(income_years) != 1 else ''} "
+        f"{', '.join(str(int(y)) for y in sorted(income_years))}."
+        if income_years
+        else "Paavo median disposable household income (EUR/year); missing where not published."
+    )
+
     filtered = filter_affordability_table(
         table,
         only_fits=only_fits,
+        only_comfortable=only_comfortable,
         hide_low_reliability=hide_low,
         municipalities=municipality_filter or None,
     )
@@ -570,6 +663,12 @@ def _render_affordability_tab(
             on_select="rerun",
             selection_mode="single-row",
             key="afford_area_table",
+            column_config={
+                "Household income (EUR/year)": st.column_config.TextColumn(
+                    "Household income (EUR/year)",
+                    help=income_year_help,
+                ),
+            },
         )
         picked = _postal_from_affordability_selection(sorted_table, table_state)
         if picked:
@@ -581,6 +680,64 @@ def _render_affordability_tab(
         st.caption(
             f"Selected area **{str(active).zfill(5)}** — open the **Map** tab to see it on the map."
         )
+
+    if active:
+        code = str(active).zfill(5)
+        area_row = table.loc[table["postal_code"] == code]
+        st.subheader("What if rates rise?")
+        st.caption(
+            "Uses the area's **median household income** and **typical price** for your "
+            f"apartment size ({afford['size_sqm']:g} m²) at sidebar loan settings. "
+            "This is a rough guide only."
+        )
+        st.caption(PAYMENT_SHARE_RULES_NOTE)
+        if area_row.empty:
+            st.warning(
+                f"**{code}** has no published price for this quarter and building type."
+            )
+        else:
+            row0 = area_row.iloc[0]
+            typical = float(row0["typical_price"])
+            hh_income = row0.get("median_household_income_eur")
+            income_missing = (
+                hh_income is None
+                or (isinstance(hh_income, float) and np.isnan(hh_income))
+                or pd.isna(hh_income)
+            )
+            income_shock = st.selectbox(
+                "Income change (stress)",
+                options=(0, -10, -20, -30),
+                format_func=lambda v: f"{v:+d} %" if v != 0 else "No change (0 %)",
+                key="afford_income_shock",
+            )
+            if income_missing:
+                st.info(
+                    f"No **median household income** is available for **{code}**; "
+                    "payment share columns show “—”."
+                )
+            try:
+                down = down_payment_from_inputs(
+                    typical,
+                    float(afford["down_payment_value"]),
+                    use_percent=use_percent,
+                )
+            except ValueError as exc:
+                st.error(str(exc))
+            else:
+                stress_df = stress_test(
+                    typical,
+                    down,
+                    float(afford["annual_rate_pct"]),
+                    float(afford["loan_years"]),
+                    float(hh_income) if not income_missing else float("nan"),
+                    income_shock_pct=float(income_shock),
+                )
+                st.dataframe(
+                    _stress_test_display_frame(stress_df),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+        st.caption(AFFORDABILITY_DISCLAIMER)
 
     with st.expander("How the numbers are calculated"):
         calc_source = st.radio(
@@ -1556,6 +1713,14 @@ with map_tab:
             )
             for key, label in BUDGET_FIT_LABELS.items():
                 st.caption(f"**{label}**")
+        elif metric == METRIC_PAYMENT_INCOME_SHARE:
+            st.markdown(
+                "- **Darker fill** — higher share of **median household income** going to "
+                "the monthly loan payment (typical flat price × sidebar size and loan settings).\n"
+                "- **Unfilled areas** — missing price and/or Paavo household income; never shown as zero.\n"
+                f"- {PAYMENT_SHARE_RULES_NOTE}\n"
+                "- Uses the same loan assumptions as the **Affordability** tab."
+            )
         else:
             bullets = (
                 "- **Darker fill** means a **higher** value; **lighter fill** means lower (light grey to black).\n"
@@ -1740,6 +1905,7 @@ with map_tab:
 with afford_tab:
     _render_affordability_tab(
         prices,
+        demographics,
         quarter,
         building_type_code,
         afford_inputs,
