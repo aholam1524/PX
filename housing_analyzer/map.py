@@ -60,6 +60,7 @@ METRIC_SALES = "sales_4q"
 METRIC_MARKET_ACTIVITY = "market_activity"
 METRIC_PRICE_TO_INCOME = "price_to_income"
 METRIC_FITS_BUDGET = "fits_budget"
+METRIC_GROSS_RENTAL_YIELD = "gross_rental_yield_pct"
 
 METRIC_CHOICES: tuple[tuple[str, str], ...] = (
     (METRIC_PRICE, "Price per square metre"),
@@ -74,6 +75,7 @@ METRIC_CHOICES: tuple[tuple[str, str], ...] = (
     ),
     (METRIC_PRICE_TO_INCOME, "Price-to-income ratio (rough)"),
     (METRIC_FITS_BUDGET, "Fits my budget"),
+    (METRIC_GROSS_RENTAL_YIELD, "Gross rental yield (%)"),
 )
 
 BUILDING_TYPE_CHOICES: tuple[tuple[str, str], ...] = (
@@ -94,6 +96,7 @@ METRIC_UNITS: dict[str, str] = {
     METRIC_MARKET_ACTIVITY: "sales per 1,000 inh.",
     METRIC_PRICE_TO_INCOME: "years income / m²",
     METRIC_FITS_BUDGET: "vs budget",
+    METRIC_GROSS_RENTAL_YIELD: "%",
 }
 
 BUDGET_FIT_LABELS: dict[str, str] = {
@@ -353,6 +356,8 @@ def format_metric_value(value: float, metric: str) -> str:
     if metric == METRIC_MARKET_ACTIVITY:
         return f"{value:.1f} {unit}"
     if metric == METRIC_PRICE_TO_INCOME:
+        return f"{value:.2f} {unit}"
+    if metric == METRIC_GROSS_RENTAL_YIELD:
         return f"{value:.2f} {unit}"
     return f"{value} {unit}"
 
