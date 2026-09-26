@@ -168,7 +168,7 @@ def affordability_table(
 ) -> pd.DataFrame:
     """One row per postal-code area with a published price for the selection."""
     from housing_analyzer.map import resolve_building_type_label
-    from housing_analyzer.panel import area_display_name, municipality_name_from_prices
+    from housing_analyzer.panel import postal_code_name_lookup
 
     bt_label = resolve_building_type_label(prices_df, building_type_code)
     summaries = summarize_areas(prices_df, quarter, building_type=bt_label)
@@ -189,6 +189,7 @@ def affordability_table(
             ]
         )
 
+    name_lookup = postal_code_name_lookup(prices_df)
     rows: list[dict[str, Any]] = []
     for postal_code, summary in summaries.iterrows():
         price_sqm = summary["price_per_sqm"]
@@ -200,15 +201,22 @@ def affordability_table(
         down = down_payment_from_inputs(
             typical, down_payment_value, use_percent=use_percent
         )
-        principal = loan_amount(typical, down)
-        payment = monthly_payment(principal, annual_rate_pct, years)
+        if down > typical:
+            # A fixed-EUR down payment can exceed a cheap area's typical price;
+            # loan_amount() would raise, so treat it as over budget instead.
+            category = BUDGET_FIT_OVER
+            payment = float("nan")
+        else:
+            principal = loan_amount(typical, down)
+            payment = monthly_payment(principal, annual_rate_pct, years)
         headroom = max_affordable_price - typical
         code = str(postal_code).zfill(5)
+        area_name, municipality = name_lookup.get(code, ("", ""))
         rows.append(
             {
                 "postal_code": code,
-                "area_name": area_display_name(prices_df, code),
-                "municipality": municipality_name_from_prices(prices_df, code) or "",
+                "area_name": area_name,
+                "municipality": municipality,
                 "typical_price": typical,
                 "price_per_sqm": price_sqm_f,
                 "budget_fit": category,

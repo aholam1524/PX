@@ -108,6 +108,31 @@ def area_display_name(prices_df: pd.DataFrame, postal_code: str) -> str:
     return _MUNICIPALITY_SUFFIX.sub("", name).strip()
 
 
+def postal_code_name_lookup(prices_df: pd.DataFrame) -> dict[str, tuple[str, str]]:
+    """Precompute postal_code -> (area_display_name, municipality) once.
+
+    Equivalent to calling ``area_display_name`` and
+    ``municipality_name_from_prices`` per postal code, but scans
+    ``prices_df`` a single time instead of once per code.
+    """
+    codes = prices_df["postal_code"].astype(str).str.zfill(5)
+    lookup: dict[str, tuple[str, str]] = {}
+    for code, area_names in prices_df["area_name"].groupby(codes):
+        names = area_names.dropna().astype(str)
+        if names.empty:
+            lookup[code] = ("", "")
+            continue
+        display_name = _MUNICIPALITY_SUFFIX.sub("", str(names.iloc[0])).strip()
+        municipality = ""
+        for name in names.unique():
+            match = _MUNICIPALITY_SUFFIX.search(name.strip())
+            if match:
+                municipality = match.group(1).strip()
+                break
+        lookup[code] = (display_name, municipality)
+    return lookup
+
+
 def _header_text_part(value: Any) -> str:
     if value is None:
         return ""
