@@ -15,6 +15,7 @@ from housing_analyzer.data import paths as data_paths
 from housing_analyzer.data.municipalities import parse_municipality_json_stat2
 from housing_analyzer.data.paths import MAX_SNAPSHOT_TOTAL_BYTES
 from housing_analyzer.data.prices import load_prices, parse_json_stat2
+from housing_analyzer.data.demographics import NATIONAL_DEMOGRAPHICS_COLUMNS
 from housing_analyzer.data.snapshot import (
     build_manifest,
     check_snapshot_size,
@@ -42,6 +43,11 @@ def snapshot_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(data_paths, "CPI_SNAPSHOT_FILE", snap / "cpi.csv.gz")
     monkeypatch.setattr(
         data_paths, "DEMOGRAPHICS_SNAPSHOT_FILE", snap / "demographics.csv.gz"
+    )
+    monkeypatch.setattr(
+        data_paths,
+        "DEMOGRAPHICS_NATIONAL_SNAPSHOT_FILE",
+        snap / "demographics_national.json.gz",
     )
     monkeypatch.setattr(
         data_paths, "MUNICIPALITY_PRICES_SNAPSHOT_FILE", snap / "municipality_prices.csv.gz"
@@ -130,6 +136,46 @@ def sample_demographics_frame() -> pd.DataFrame:
             "share_age_65_plus": [0.1],
             "share_higher_education": [0.3],
         }
+    )
+
+
+@pytest.fixture
+def sample_national_demographics() -> pd.Series:
+    data = {col: 1.0 for col in NATIONAL_DEMOGRAPHICS_COLUMNS}
+    data["data_year"] = 2024
+    return pd.Series(data)
+
+
+def test_write_snapshot_with_national_demographics(
+    snapshot_dir,
+    sample_prices_frame,
+    sample_boundaries,
+    sample_cpi_frame,
+    sample_demographics_frame,
+    sample_national_demographics,
+):
+    manifest = write_snapshot(
+        sample_prices_frame,
+        sample_boundaries,
+        sample_cpi_frame,
+        sample_demographics_frame,
+        demographics_national=sample_national_demographics,
+    )
+    assert data_paths.DEMOGRAPHICS_NATIONAL_SNAPSHOT_FILE.is_file()
+
+    national_entry = manifest["files"]["demographics_national.json.gz"]
+    assert (
+        national_entry["bytes"]
+        == data_paths.DEMOGRAPHICS_NATIONAL_SNAPSHOT_FILE.stat().st_size
+    )
+    assert national_entry["bytes"] > 0
+    assert manifest["total_bytes"] >= national_entry["bytes"]
+
+    loaded = load_manifest()
+    assert loaded is not None
+    assert (
+        loaded["files"]["demographics_national.json.gz"]["bytes"]
+        == national_entry["bytes"]
     )
 
 
