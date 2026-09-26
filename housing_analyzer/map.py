@@ -26,6 +26,7 @@ from housing_analyzer.affordability import (
     BUDGET_FIT_WITHIN,
     affordability_table,
     budget_ratio_and_category,
+    classify_payment_share,
     typical_dwelling_price,
 )
 
@@ -60,6 +61,7 @@ METRIC_SALES = "sales_4q"
 METRIC_MARKET_ACTIVITY = "market_activity"
 METRIC_PRICE_TO_INCOME = "price_to_income"
 METRIC_FITS_BUDGET = "fits_budget"
+METRIC_PAYMENT_INCOME_SHARE = "payment_income_share"
 METRIC_GROSS_RENTAL_YIELD = "gross_rental_yield_pct"
 
 METRIC_CHOICES: tuple[tuple[str, str], ...] = (
@@ -75,6 +77,7 @@ METRIC_CHOICES: tuple[tuple[str, str], ...] = (
     ),
     (METRIC_PRICE_TO_INCOME, "Price-to-income ratio (rough)"),
     (METRIC_FITS_BUDGET, "Fits my budget"),
+    (METRIC_PAYMENT_INCOME_SHARE, "Payment share of household income"),
     (METRIC_GROSS_RENTAL_YIELD, "Gross rental yield (%)"),
 )
 
@@ -96,6 +99,7 @@ METRIC_UNITS: dict[str, str] = {
     METRIC_MARKET_ACTIVITY: "sales per 1,000 inh.",
     METRIC_PRICE_TO_INCOME: "years income / m²",
     METRIC_FITS_BUDGET: "vs budget",
+    METRIC_PAYMENT_INCOME_SHARE: "% of income",
     METRIC_GROSS_RENTAL_YIELD: "%",
 }
 
@@ -357,6 +361,8 @@ def format_metric_value(value: float, metric: str) -> str:
         return f"{value:.1f} {unit}"
     if metric == METRIC_PRICE_TO_INCOME:
         return f"{value:.2f} {unit}"
+    if metric == METRIC_PAYMENT_INCOME_SHARE:
+        return f"{value * 100:.1f} {unit}"
     if metric == METRIC_GROSS_RENTAL_YIELD:
         return f"{value:.2f} {unit}"
     return f"{value} {unit}"
@@ -599,6 +605,96 @@ def prepare_budget_fit_dataframe(
         )
         records.append(record)
     return pd.DataFrame(records)
+
+
+def prepare_payment_income_share_dataframe(
+    prices_df: pd.DataFrame,
+    boundaries: Mapping[str, Any],
+    quarter: str,
+    building_type_code: str | None,
+    size_sqm: float,
+    *,
+    annual_rate_pct: float,
+    years: float,
+    down_payment_value: float,
+    use_percent: bool,
+    cpi_df: pd.DataFrame | None = None,
+    demographics_df: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """Map layer: monthly payment / monthly household income (share as fraction)."""
+    base = prepare_map_dataframe(
+        prices_df,
+        boundaries,
+        quarter,
+        building_type_code,
+        METRIC_PRICE,
+        cpi_df=cpi_df,
+        demographics_df=demographics_df,
+    )
+    if base.empty:
+        return base
+
+    afford = affordability_table(
+        prices_df,
+        quarter,
+        building_type_code,
+        size_sqm,
+        max_affordable_price=1.0,
+        annual_rate_pct=annual_rate_pct,
+        years=years,
+        down_payment_value=down_payment_value,
+        use_percent=use_percent,
+        demographics_df=demographics_df,
+    ).set_index("postal_code")
+
+    records: list[dict[str, Any]] = []
+    for row in base.to_dict("records"):
+        code = str(row.get("postal_code", "")).zfill(5)
+        record = dict(row)
+        share = float("nan")
+        if code in afford.index:
+            fit_row = afford.loc[code]
+            raw_share = fit_row.get("payment_income_share")
+            if raw_share is not None and not (
+                isinstance(raw_share, float) and np.isnan(raw_share)
+            ):
+                share = float(raw_share)
+        record[METRIC_PAYMENT_INCOME_SHARE] = share
+        record["missing"] = np.isnan(share)
+        record["hover"] = _format_payment_share_hover(row, share, size_sqm)
+        records.append(record)
+    return pd.DataFrame(records)
+
+
+def _format_payment_share_hover(
+    row: Mapping[str, Any], share: float, size_sqm: float
+) -> str:
+    postal = str(row.get("postal_code", "")).zfill(5)
+    name = row.get("area_name") or ""
+    price_sqm = row.get("price_per_sqm")
+    if (
+        price_sqm is None
+        or (isinstance(price_sqm, float) and np.isnan(price_sqm))
+        or pd.isna(price_sqm)
+        or np.isnan(share)
+    ):
+        return (
+            f"<b>{postal}</b> {name}<br>"
+            f"{NO_DATA_HOVER}<br>"
+            f"Reliability: {reliability_display(row.get('reliability'))}"
+        )
+    typical = typical_dwelling_price(float(price_sqm), size_sqm)
+    class_label = classify_payment_share(share)
+    lines = [
+        f"<b>{postal}</b> {name}",
+        f"Typical price ({size_sqm:g} m²): {typical:,.0f} EUR",
+        f"Payment share of household income: {share * 100:.1f} %",
+        f"Class (rule of thumb): {class_label}",
+        f"Reliability: {reliability_display(row.get('reliability'))}",
+    ]
+    if str(row.get("reliability")) == "low":
+        lines.append(LOW_RELIABILITY_HOVER)
+    return "<br>".join(lines)
 
 
 def search_area_matches(map_df: pd.DataFrame, query: str) -> list[str]:
