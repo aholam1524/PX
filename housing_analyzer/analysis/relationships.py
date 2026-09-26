@@ -85,6 +85,20 @@ RELATIONSHIP_PLOTS: tuple[RelationshipPlotSpec, ...] = (
         y_label="Price per m² (EUR)",
         x_column="share_higher_education",
     ),
+    RelationshipPlotSpec(
+        key="unemployment",
+        title="Price per m² vs unemployment rate",
+        x_label="Unemployment rate (labour force)",
+        y_label="Price per m² (EUR)",
+        x_column="unemployment_rate",
+    ),
+    RelationshipPlotSpec(
+        key="rented",
+        title="Price per m² vs rented-household share",
+        x_label="Share of rented households",
+        y_label="Price per m² (EUR)",
+        x_column="rented_share",
+    ),
 )
 
 
@@ -117,7 +131,7 @@ def prepare_relationships_frame(
     summaries: pd.DataFrame,
     demographics: pd.DataFrame,
 ) -> tuple[pd.DataFrame, int]:
-    """Areas with OK price reliability and complete demographics for all three x-variables."""
+    """Areas with OK price reliability and complete demographics for relationship plots."""
     demo = demographics.set_index(demographics["postal_code"].astype(str).str.zfill(5))
     rows: list[dict[str, Any]] = []
     excluded = 0
@@ -134,6 +148,8 @@ def prepare_relationships_frame(
             "median_income_eur",
             "share_age_65_plus",
             "share_higher_education",
+            "unemployment_rate",
+            "rented_share",
         )
         if any(pd.isna(demo_row.get(col)) for col in needed):
             excluded += 1
@@ -145,6 +161,8 @@ def prepare_relationships_frame(
                 "median_income_eur": float(demo_row["median_income_eur"]),
                 "share_age_65_plus": float(demo_row["share_age_65_plus"]),
                 "share_higher_education": float(demo_row["share_higher_education"]),
+                "unemployment_rate": float(demo_row["unemployment_rate"]),
+                "rented_share": float(demo_row["rented_share"]),
             }
         )
     return pd.DataFrame(rows), excluded

@@ -52,6 +52,38 @@ def test_apptest_detail_panel_with_fixtures(monkeypatch):
     assert "00100" in joined or "Area detail" in joined
 
 
+def test_apptest_area_profile_with_fixtures(monkeypatch):
+    apptest_mod = importlib.util.find_spec("streamlit.testing.v1")
+    if apptest_mod is None:
+        pytest.skip("streamlit.testing.v1.AppTest not available in this Streamlit version")
+
+    monkeypatch.setenv("HOUSING_USE_FIXTURES", "1")
+
+    from streamlit.testing.v1 import AppTest
+
+    at = AppTest.from_file(str(STREAMLIT_APP))
+    at.run(timeout=60)
+    assert not at.exception
+
+    if at.text_input:
+        at.text_input[0].set_value("00100").run(timeout=60)
+    if at.button:
+        for button in at.button:
+            if "Show selected area" in (button.label or ""):
+                button.click().run(timeout=60)
+                break
+
+    at.run(timeout=60)
+    assert not at.exception
+
+    body = " ".join(
+        getattr(el, "value", "") or ""
+        for group in (at.markdown, at.expander, at.caption)
+        for el in group
+    )
+    assert "Area profile" in body or "Rented households" in body
+
+
 _DETAIL_PANEL_METRIC_LABELS = frozenset(
     {
         "Price per m² (EUR)",

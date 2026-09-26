@@ -33,7 +33,10 @@ from housing_analyzer.data import (
     load_manifest,
     load_prices,
 )
-from housing_analyzer.data.demographics import attach_demographics_to_summaries
+from housing_analyzer.data.demographics import (
+    attach_demographics_to_summaries,
+    load_national_demographics,
+)
 from housing_analyzer.data.cpi import cpi_by_quarter
 from housing_analyzer.data.paths import use_fixtures
 from housing_analyzer.data.snapshot import snapshot_is_complete
@@ -93,6 +96,8 @@ from housing_analyzer.map import (
 from housing_analyzer.panel import (
     area_detail_export_frame,
     area_display_name,
+    area_profile_data_year,
+    build_area_profile_items,
     build_sales_volume_figure,
     build_trend_chart_data,
     build_trend_figure,
@@ -141,6 +146,11 @@ def _load_housing_data() -> tuple:
     demographics = load_demographics()
     manifest = load_manifest()
     return prices, boundaries, cpi, demographics, manifest
+
+
+@st.cache_data(show_spinner=False)
+def _load_national_demographics() -> pd.Series:
+    return load_national_demographics()
 
 
 @st.cache_data(show_spinner=False)
@@ -770,6 +780,8 @@ def _render_detail_panel(
     prices: pd.DataFrame,
     boundaries: dict,
     cpi: pd.DataFrame,
+    demographics: pd.DataFrame,
+    national_demographics: pd.Series,
     postal_code: str,
     quarter: str,
     map_building_type_code: str | None,
@@ -867,6 +879,28 @@ def _render_detail_panel(
     )
     st.caption(rel_text)
 
+    demo_index = demographics.set_index(
+        demographics["postal_code"].astype(str).str.zfill(5)
+    )
+    if code in demo_index.index:
+        area_demo = demo_index.loc[code]
+        profile_items = build_area_profile_items(area_demo, national_demographics)
+        profile_year = area_profile_data_year(area_demo, national_demographics)
+        with st.expander("Area profile"):
+            if profile_year is not None:
+                st.caption(f"Statistics Finland Paavo, {profile_year}.")
+            for item in profile_items:
+                if item.help:
+                    st.markdown(
+                        f"- {item.label} "
+                        f'<span title="{item.help}">—</span> {item.national_text}',
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.markdown(
+                        f"- {item.label} {item.area_text} {item.national_text}"
+                    )
+
     if st.button("Add to comparison", key=f"add_compare_{code}"):
         if _add_to_compare(code):
             st.success(f"{code} added to comparison.")
@@ -932,6 +966,7 @@ def _render_detail_panel(
 try:
     with st.spinner("Loading housing prices and map boundaries…"):
         prices, boundaries, cpi, demographics, manifest = _load_housing_data()
+        national_demographics = _load_national_demographics()
         mun_prices, mun_boundaries = _load_municipality_data()
 except Exception as exc:  # noqa: BLE001 — show reason in UI
     st.error(_friendly_load_error(exc))
@@ -1218,6 +1253,8 @@ with map_tab:
                     prices,
                     boundaries,
                     cpi,
+                    demographics,
+                    national_demographics,
                     selected,
                     quarter,
                     building_type_code,

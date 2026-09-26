@@ -1,5 +1,5 @@
 {
-  "fetch_date": "2026-09-25",
+  "fetch_date": "2026-09-26",
   "files": {
     "prices.csv.gz": {
       "bytes": 3286962,
@@ -19,14 +19,42 @@
       "source_url": "https://pxdata.stat.fi/PxWeb/api/v1/en/StatFin/khi/11xs.px"
     },
     "demographics.csv.gz": {
-      "bytes": 68260,
+      "bytes": 275050,
       "rows": 3018,
-      "source_url": "https://pxdata.stat.fi/PxWeb/api/v1/en/Postinumeroalueittainen_avoin_tieto/uusin \u2014 tables 12ey.px, 12f1.px, 12ez.px (year 2024)",
+      "source_url": "https://pxdata.stat.fi/PxWeb/api/v1/en/Postinumeroalueittainen_avoin_tieto/uusin \u2014 tables 12ey, 12f1, 12ez, 12f2, 12f3, 12f4, 12f6 (year 2024)",
       "paavo_tables": {
         "population": "https://pxdata.stat.fi/PxWeb/api/v1/en/Postinumeroalueittainen_avoin_tieto/uusin/12ey.px",
         "income": "https://pxdata.stat.fi/PxWeb/api/v1/en/Postinumeroalueittainen_avoin_tieto/uusin/12f1.px",
-        "education": "https://pxdata.stat.fi/PxWeb/api/v1/en/Postinumeroalueittainen_avoin_tieto/uusin/12ez.px"
+        "education": "https://pxdata.stat.fi/PxWeb/api/v1/en/Postinumeroalueittainen_avoin_tieto/uusin/12ez.px",
+        "households": "https://pxdata.stat.fi/PxWeb/api/v1/en/Postinumeroalueittainen_avoin_tieto/uusin/12f2.px",
+        "household_income": "https://pxdata.stat.fi/PxWeb/api/v1/en/Postinumeroalueittainen_avoin_tieto/uusin/12f3.px",
+        "dwellings": "https://pxdata.stat.fi/PxWeb/api/v1/en/Postinumeroalueittainen_avoin_tieto/uusin/12f4.px",
+        "activity": "https://pxdata.stat.fi/PxWeb/api/v1/en/Postinumeroalueittainen_avoin_tieto/uusin/12f6.px"
       },
+      "data_year": "2024",
+      "variable_codes": {
+        "postal_code": "postinumeroalue_4_20260101",
+        "households_total": "te_taly",
+        "average_household_size": "te_takk",
+        "average_floor_area_per_person": "te_as_valj",
+        "households_owner_occupied": "te_omis_as",
+        "households_rented": "te_vuok_as",
+        "median_household_income_eur": "tr_mtu",
+        "dwellings": "ra_asunn",
+        "average_floor_area_per_dwelling": "ra_as_kpa",
+        "dwellings_blocks_of_flats": "ra_kt_as",
+        "dwellings_small_houses": "ra_pt_as",
+        "activity_inhabitants": "pt_vakiy",
+        "employed": "pt_tyoll",
+        "unemployed": "pt_tyott",
+        "students": "pt_opisk",
+        "pensioners": "pt_elakel"
+      }
+    },
+    "demographics_national.json.gz": {
+      "bytes": 479,
+      "source_url": "https://pxdata.stat.fi/PxWeb/api/v1/en/Postinumeroalueittainen_avoin_tieto/uusin \u2014 tables 12ey, 12f1, 12ez, 12f2, 12f3, 12f4, 12f6 (year 2024)",
+      "national_code": "SSS",
       "data_year": "2024"
     },
     "municipality_prices.csv.gz": {
@@ -64,5 +92,5 @@
       "derived_from": "boundaries.geojson.gz"
     }
   },
-  "total_bytes": 5394769
+  "total_bytes": 5602038
 }
