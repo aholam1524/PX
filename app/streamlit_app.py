@@ -1076,7 +1076,9 @@ def _render_detail_panel(
         help=MARKET_ACTIVITY_METRIC_HELP,
     )
     c8.empty()
-    market_act_caption = market_activity_panel_caption(sales_4q)
+    market_act_caption = (
+        market_activity_panel_caption(sales_4q) if market_act == market_act else None
+    )
     if market_act_caption:
         st.caption(market_act_caption)
 
