@@ -148,12 +148,12 @@ def prepare_relationships_frame(
             "median_income_eur",
             "share_age_65_plus",
             "share_higher_education",
-            "unemployment_rate",
-            "rented_share",
         )
         if any(pd.isna(demo_row.get(col)) for col in needed):
             excluded += 1
             continue
+        unemployment_rate = demo_row["unemployment_rate"]
+        rented_share = demo_row["rented_share"]
         rows.append(
             {
                 "postal_code": postal,
@@ -161,8 +161,10 @@ def prepare_relationships_frame(
                 "median_income_eur": float(demo_row["median_income_eur"]),
                 "share_age_65_plus": float(demo_row["share_age_65_plus"]),
                 "share_higher_education": float(demo_row["share_higher_education"]),
-                "unemployment_rate": float(demo_row["unemployment_rate"]),
-                "rented_share": float(demo_row["rented_share"]),
+                "unemployment_rate": float(unemployment_rate)
+                if pd.notna(unemployment_rate)
+                else float("nan"),
+                "rented_share": float(rented_share) if pd.notna(rented_share) else float("nan"),
             }
         )
     return pd.DataFrame(rows), excluded

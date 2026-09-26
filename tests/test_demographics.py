@@ -8,11 +8,13 @@ import pytest
 
 from housing_analyzer.analysis.relationships import (
     CORRELATION_DISCLAIMER,
+    build_relationships_summary,
     pearson_correlation,
     prepare_relationships_frame,
     price_to_income_ratio,
 )
 from housing_analyzer.data.demographics import (
+    DEMOGRAPHICS_COLUMNS,
     MEASURE_POPULATION,
     MEASURES_AGE_65_PLUS,
     _assemble_demographics,
@@ -192,6 +194,46 @@ def test_prepare_relationships_frame_excludes_unreliable(monkeypatch):
     assert len(frame) == 1
     assert excluded == 1
     assert CORRELATION_DISCLAIMER
+
+
+def test_prepare_relationships_frame_keeps_rows_missing_only_new_columns():
+    """An area missing unemployment_rate/rented_share still counts for the
+    pre-existing income/age/education plots; only its own dropna'd plots shrink."""
+    base = {col: float("nan") for col in DEMOGRAPHICS_COLUMNS}
+    complete = {
+        **base,
+        "postal_code": "00100",
+        "median_income_eur": 30000.0,
+        "share_age_65_plus": 0.2,
+        "share_higher_education": 0.3,
+        "unemployment_rate": 0.1,
+        "rented_share": 0.4,
+    }
+    missing_new_cols = {
+        **base,
+        "postal_code": "00200",
+        "median_income_eur": 32000.0,
+        "share_age_65_plus": 0.25,
+        "share_higher_education": 0.35,
+    }
+    demo = pd.DataFrame([complete, missing_new_cols])
+    summaries = pd.DataFrame(
+        {
+            "price_per_sqm": [5000.0, 4500.0],
+            "reliability": ["ok", "ok"],
+        },
+        index=["00100", "00200"],
+    )
+
+    frame, excluded = prepare_relationships_frame(summaries, demo)
+    assert len(frame) == 2
+    assert excluded == 0
+
+    summary = build_relationships_summary(summaries, demo)
+    plots_by_key = {plot.spec.key: plot for plot in summary.plots}
+    assert plots_by_key["income"].n_areas == 2
+    assert plots_by_key["unemployment"].n_areas == 1
+    assert plots_by_key["rented"].n_areas == 1
 
 
 def test_load_national_demographics_fixture(monkeypatch):
