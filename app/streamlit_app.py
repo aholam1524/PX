@@ -33,7 +33,9 @@ from housing_analyzer.data import (
     load_demographics,
     load_manifest,
     load_prices,
+    load_rents,
 )
+from housing_analyzer.data.rents import load_municipality_region_map
 from housing_analyzer.data.demographics import (
     attach_demographics_to_summaries,
     load_national_demographics,
@@ -80,6 +82,7 @@ from housing_analyzer.map import (
     METRIC_CHANGE_1Y,
     METRIC_CHANGE_5Y,
     METRIC_FITS_BUDGET,
+    METRIC_GROSS_RENTAL_YIELD,
     METRIC_MARKET_ACTIVITY,
     METRIC_PRICE,
     build_choropleth_figure,
@@ -98,6 +101,14 @@ from housing_analyzer.map import (
     search_area_matches,
     trailing_sales_by_area,
     typical_quarter_price_coverage,
+)
+from housing_analyzer.rent_vs_buy import (
+    RENT_VS_BUY_DISCLAIMER,
+    RENT_VS_BUY_HONESTY,
+    build_rent_vs_buy_summary,
+    monthly_comparison_table_rows,
+    prepare_gross_rental_yield_dataframe,
+    rent_files_available,
 )
 from housing_analyzer.panel import (
     area_detail_export_frame,
@@ -178,6 +189,8 @@ def _cached_map_frame(
     _boundaries,
     _cpi,
     _demographics,
+    _rents,
+    _region_map,
     quarter,
     building_type_code,
     metric,
@@ -202,6 +215,17 @@ def _cached_map_frame(
             years=loan_years,
             down_payment_value=down_payment_value,
             use_percent=down_use_percent,
+            cpi_df=_cpi,
+            demographics_df=_demographics,
+        )
+    if metric == METRIC_GROSS_RENTAL_YIELD:
+        return prepare_gross_rental_yield_dataframe(
+            _prices,
+            _boundaries,
+            quarter,
+            building_type_code,
+            _rents,
+            _region_map,
             cpi_df=_cpi,
             demographics_df=_demographics,
         )
@@ -617,6 +641,164 @@ def _render_affordability_tab(
                     f"- Total interest over term: **{interest:,.0f} EUR**"
                 )
         st.caption(AFFORDABILITY_DISCLAIMER)
+
+
+def _render_rent_vs_buy_tab(
+    prices: pd.DataFrame,
+    boundaries: dict,
+    quarter: str,
+    building_type_code: str | None,
+    afford: dict[str, float | bool | str],
+    rents_df: pd.DataFrame,
+    region_map: pd.DataFrame,
+    mun_prices: pd.DataFrame | None,
+    selected_postal_code: str | None,
+) -> None:
+    import math
+
+    st.subheader("Rent vs buy")
+    st.caption(
+        f"Quarter **{quarter}** · {_format_building_type_display(prices, building_type_code)}"
+    )
+    st.caption(RENT_VS_BUY_HONESTY)
+
+    monthly_charge = st.number_input(
+        "Housing-company maintenance charge (EUR/m² per month, assumption)",
+        min_value=0.0,
+        value=4.0,
+        step=0.5,
+        key="rent_vs_buy_charge_per_sqm",
+        help="Typical monthly maintenance charge per square metre for owner-occupied flats.",
+    )
+
+    search_query = st.text_input(
+        "Search by postal code or area name",
+        placeholder="e.g. 00100 or Punavuori",
+        key="rent_vs_buy_search",
+    )
+    matches = search_area_matches(prices, search_query) if search_query.strip() else []
+    if search_query.strip():
+        if matches:
+            codes = matches[:20]
+
+            def _match_label(code: str) -> str:
+                hits = prices.loc[prices["postal_code"] == code, "area_name"]
+                area_name = hits.iloc[0] if not hits.empty else ""
+                return f"{code} — {area_name or ''}".strip(" —")
+
+            picked_code = st.selectbox(
+                "Matching areas",
+                options=codes,
+                format_func=_match_label,
+                key="rent_vs_buy_search_pick",
+            )
+            if st.button("Use searched area", key="rent_vs_buy_use_search"):
+                st.session_state.selected_postal_code = picked_code
+                st.session_state.selected_map_level = "postal"
+        else:
+            st.caption("No areas match that search.")
+
+    active = st.session_state.get("selected_postal_code") or selected_postal_code
+    if not active:
+        st.info(
+            "Select an area on the **Map** tab, search above, or pick a row on the "
+            "**Affordability** tab."
+        )
+        st.caption(RENT_VS_BUY_DISCLAIMER)
+        st.caption("For information only — not investment advice.")
+        return
+
+    code = str(active).zfill(5)
+    st.markdown(f"**Area {code}** — {area_display_name(prices, code)}")
+
+    summary = build_rent_vs_buy_summary(
+        prices,
+        boundaries,
+        code,
+        quarter,
+        building_type_code,
+        rents_df,
+        region_map,
+        size_sqm=float(afford["size_sqm"]),
+        down_payment_value=float(afford["down_payment_value"]),
+        use_percent_down=afford["down_mode"] == "percent",
+        annual_rate_pct=float(afford["annual_rate_pct"]),
+        years=float(afford["loan_years"]),
+        monthly_charge_per_sqm=float(monthly_charge),
+        municipality_prices=mun_prices,
+    )
+
+    price_quote = summary["price_quote"]
+    rent_quote = summary["rent_quote"]
+
+    if price_quote is None:
+        st.warning(
+            "No purchase price is available for this area (postal-code or municipality average)."
+        )
+    else:
+        st.markdown(
+            f"- **Price per m²:** {price_quote.price_per_sqm:,.0f} EUR/m² "
+            f"({price_quote.source_label})"
+        )
+
+    if rent_quote is None:
+        st.warning(
+            "No average rent is available for this area's rent region at the selected "
+            "building type and funding class."
+        )
+    else:
+        obs_text = (
+            f"{rent_quote.rent_observations:,}"
+            if rent_quote.rent_observations is not None
+            else "—"
+        )
+        st.markdown(
+            f"- **Rent per m²:** {rent_quote.rent_per_sqm:,.2f} EUR/m² "
+            f"(rent area: **{rent_quote.area_label}**, quarter **{rent_quote.quarter}**, "
+            f"{obs_text} observations)\n"
+            f"- **Rent table funding:** {summary['funding_display']}\n"
+            f"- **Rent room class:** {summary['rooms_code']} — {summary['rooms_label']}"
+        )
+
+    yield_frac = summary["yield_fraction"]
+    ptr = summary["price_to_rent_ratio"]
+    if price_quote and rent_quote:
+        c1, c2 = st.columns(2)
+        c1.metric(
+            "Gross rental yield",
+            f"{yield_frac * 100:.2f} %"
+            if not math.isnan(yield_frac)
+            else "—",
+        )
+        c2.metric(
+            "Price-to-rent ratio",
+            f"{ptr:.1f} years" if not math.isnan(ptr) else "—",
+        )
+
+        comparison = summary["comparison"]
+        if comparison is None:
+            st.warning("Could not build a monthly comparison (check down payment and size).")
+        else:
+            st.markdown("**Monthly comparison** (uses sidebar loan assumptions)")
+            table = pd.DataFrame(monthly_comparison_table_rows(comparison))
+            st.dataframe(
+                table,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "EUR/month": st.column_config.NumberColumn(format="%.2f"),
+                },
+            )
+
+        st.markdown(summary["conclusion"])
+    else:
+        st.info(
+            "Need both a published price and a rent average for this area to compare "
+            "renting and buying."
+        )
+
+    st.caption(RENT_VS_BUY_DISCLAIMER)
+    st.caption("For information only — not investment advice.")
 
 
 def _render_my_home_tab(
@@ -1181,6 +1363,26 @@ if prices.empty or not (boundaries.get("features")):
     st.error("Housing data loaded but appears empty. Try again later or use fixtures.")
     st.stop()
 
+rents_df: pd.DataFrame | None = None
+region_map_df: pd.DataFrame | None = None
+rents_ready = False
+if rent_files_available():
+    try:
+        rents_df = load_rents()
+        region_map_df = load_municipality_region_map()
+        rents_ready = rents_df is not None and not rents_df.empty
+    except Exception:  # noqa: BLE001 — hide rent features when load fails
+        rents_df = None
+        region_map_df = None
+        rents_ready = False
+
+if not rents_ready:
+    st.caption(
+        "Average rent data is not in this checkout, so the **Rent vs buy** tab and "
+        "**Gross rental yield (%)** map layer are hidden. Refresh the housing data "
+        "snapshot to add `rents.csv.gz`."
+    )
+
 with st.sidebar:
     st.header("Map controls")
     quarters = list_quarters(prices)
@@ -1201,9 +1403,14 @@ with st.sidebar:
         format_func=lambda c: dict(BUILDING_TYPE_CHOICES)[c],
         index=0,
     )
+    metric_options = [
+        key
+        for key, _ in METRIC_CHOICES
+        if key != METRIC_GROSS_RENTAL_YIELD or rents_ready
+    ]
     metric = st.selectbox(
         "Metric layer",
-        options=[key for key, _ in METRIC_CHOICES],
+        options=metric_options,
         format_func=lambda k: dict(METRIC_CHOICES)[k],
         index=0,
     )
@@ -1234,9 +1441,17 @@ _init_compare_session_state()
 
 max_affordable_price = _compute_max_affordable(afford_inputs)
 
-map_tab, afford_tab, compare_tab, relationships_tab, my_home_tab = st.tabs(
-    ["Map", "Affordability", "Compare", "Relationships", "My home"]
-)
+_tab_labels = ["Map", "Affordability"]
+if rents_ready:
+    _tab_labels.append("Rent vs buy")
+_tab_labels.extend(["Compare", "Relationships", "My home"])
+_tabs = st.tabs(_tab_labels)
+_tab_by_name = dict(zip(_tab_labels, _tabs, strict=True))
+map_tab = _tab_by_name["Map"]
+afford_tab = _tab_by_name["Affordability"]
+compare_tab = _tab_by_name["Compare"]
+relationships_tab = _tab_by_name["Relationships"]
+my_home_tab = _tab_by_name["My home"]
 
 with map_tab:
     map_df = _cached_map_frame(
@@ -1244,6 +1459,8 @@ with map_tab:
         boundaries,
         cpi,
         demographics,
+        rents_df if rents_df is not None else pd.DataFrame(),
+        region_map_df if region_map_df is not None else pd.DataFrame(),
         quarter,
         building_type_code,
         metric,
@@ -1344,6 +1561,12 @@ with map_tab:
                     "\n- **Market activity** uses transaction counts (from 2020 onward) for old "
                     "dwellings in housing companies and the postal area's total population (Paavo); "
                     "it is a rough activity index, not a turnover rate of the housing stock."
+                )
+            if metric == METRIC_GROSS_RENTAL_YIELD:
+                bullets += (
+                    "\n- **Gross rental yield** compares postal-code prices to average rents "
+                    "taken at **region or city level** (not postal code). Areas without price "
+                    "or rent stay unfilled."
                 )
             st.markdown(bullets)
 
@@ -1488,6 +1711,20 @@ with afford_tab:
         afford_inputs,
         st.session_state.get("selected_postal_code"),
     )
+
+if rents_ready and rents_df is not None and region_map_df is not None:
+    with _tab_by_name["Rent vs buy"]:
+        _render_rent_vs_buy_tab(
+            prices,
+            boundaries,
+            quarter,
+            building_type_code,
+            afford_inputs,
+            rents_df,
+            region_map_df,
+            mun_prices,
+            st.session_state.get("selected_postal_code"),
+        )
 
 with compare_tab:
     _render_compare_tab(prices, quarter, building_type_code, cpi, demographics)
